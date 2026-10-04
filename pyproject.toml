@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qqperf"
+dynamic = ["version"]
+description = "Performance records for quirq infra (qq): raw numbers with units, per commit."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1"]
+
+[project.scripts]
+qqperf = "qqperf.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "qqperf.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
