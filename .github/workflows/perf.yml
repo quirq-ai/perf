@@ -145,7 +145,8 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always() && steps.pending.outputs.commit != ''
         with:
-          # ledger--<repo>--<metric>: the store job merges each only for its own repo.
+          # ledger--<repo>--<metric>: the store job takes one record from each, for that repo and
+          # metric only.
           name: ledger--${{ matrix.repo }}--${{ matrix.metric }}
           path: .qq/new/
           if-no-files-found: ignore
@@ -169,6 +170,7 @@ jobs:
           pattern: ledger--*
           path: .qq/new
       - name: append to the history branch
+        shell: bash  # -eo pipefail
         run: |
           if [ -z "$(find .qq/new -name '*.jsonl' 2>/dev/null)" ]; then
             echo "no records to store"; exit 0
@@ -188,9 +190,13 @@ jobs:
               "Perf history written by this repo's workflows (schema qq-perf-record/1), one JSON" \
               "Lines file per repo and metric. Write-once: never edit a line." > .qq/data/README.md
           fi
-          # Each ledger came from a job that ran one repo's code: take only that leg's repo and
-          # metric, only commits still pending on the repo's main, and only records naming this run.
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Each ledger came from a job that ran one repo's code. Take at most one record from it:
+          # for that leg's repo and metric, for the newest commit still pending on the repo's main
+          # (the one the leg was to measure), naming this run attempt. A refused ledger only delays
+          # its commit to a later run. Artifact names are not bound to the job that uploads them,
+          # so a compromised leg can still claim one commit of another leg per run.
+          # TODO(expert): isolate each repo's measurement in its own workflow run.
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
           refused=0
           for dir in .qq/new/ledger--*; do
             name=${dir##*/ledger--}
@@ -199,15 +205,16 @@ jobs:
               innernet/build-size|innernet/innernet-search|xo-space/xo-space-server-start) ;;
               *) echo "::error::unexpected ledger $name"; refused=1; continue ;;
             esac
-            [ -d ".qq/repos/$repo" ] || git clone --quiet --filter=blob:none --no-checkout --depth 50 \
-              "https://github.com/quirq-ai/$repo" ".qq/repos/$repo"
-            allowed=()
-            for c in $(qqperf pending --store .qq/data --repo "$repo" --metric "$metric" \
-                         --checkout ".qq/repos/$repo" --limit 50); do
-              allowed+=(--commit "$c")
-            done
-            if [ ${#allowed[@]} = 0 ] || ! qqperf merge --store .qq/data --from "$dir" --repo "$repo" \
-                --metric "$metric" --run-url "$run_url" "${allowed[@]}"; then
+            if [ ! -d ".qq/repos/$repo" ] && ! git clone --quiet --filter=blob:none --no-checkout \
+                --depth 50 "https://github.com/quirq-ai/$repo" ".qq/repos/$repo"; then
+              echo "::error::cannot clone $repo; ledger $name not stored"; refused=1; continue
+            fi
+            if ! newest=$(qqperf pending --store .qq/data --repo "$repo" --metric "$metric" \
+                            --checkout ".qq/repos/$repo" --limit 1); then
+              echo "::error::cannot list pending commits of $repo; ledger $name not stored"; refused=1; continue
+            fi
+            if [ -z "$newest" ] || ! qqperf merge --store .qq/data --from "$dir" --repo "$repo" \
+                --metric "$metric" --run-url "$run_url" --commit "$newest" --max-records 1; then
               echo "::error::ledger $name refused"; refused=1
             fi
           done

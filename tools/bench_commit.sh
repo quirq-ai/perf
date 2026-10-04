@@ -19,7 +19,7 @@ read -r -a recipes_args <<< "${QQ_RECIPES_ARGS:-}"
 extra=()
 for tc in ${QQ_TOOLCHAINS:-}; do extra+=(--toolchain "$tc"); done
 if [ -n "${GITHUB_RUN_ID:-}" ]; then
-  extra+=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+  extra+=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")
 fi
 for commit in "$@"; do
   echo "::group::${repo} ${benchmark} ${commit}"

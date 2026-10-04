@@ -27,6 +27,9 @@ _NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 DETAIL_KEYS = {"measure": str, "unit": str, "paths": list, "samples": list}
 MAX_SAMPLES = 10_000
+MAX_VALUES = 64
+MAX_TEXT = 2_000      # characters of any one string a record holds (an error message is cut there)
+MAX_FIELDS = 32       # keys of runner, toolchains and run
 
 
 class StoreError(Exception):
@@ -69,8 +72,11 @@ def _check_detail(detail) -> None:
     for key, kind in DETAIL_KEYS.items():
         if key in detail and not isinstance(detail[key], kind):
             raise StoreError(f"record detail.{key} must be a {kind.__name__}")
-    if not all(isinstance(p, str) for p in detail.get("paths", [])):
-        raise StoreError("record detail.paths must be strings")
+    paths = detail.get("paths", [])
+    if len(paths) > 100 or not all(isinstance(p, str) and len(p) <= 512 for p in paths):
+        raise StoreError("record detail.paths must be at most 100 short strings")
+    if any(len(detail.get(k, "")) > 32 for k in ("measure", "unit")):
+        raise StoreError("record detail.measure and unit must be short strings")
     samples = detail.get("samples", [])
     if len(samples) > MAX_SAMPLES or not all(_number(v) for v in samples):
         raise StoreError(f"record detail.samples must be at most {MAX_SAMPLES} finite numbers >= 0")
@@ -101,6 +107,17 @@ def validate(record) -> dict:
         raise StoreError("record runner must be an object")
     if not isinstance(record.get("run", {}), dict):
         raise StoreError("record run must be an object")
+    if len(values) > MAX_VALUES or any(len(v["name"]) > 128 or len(v["unit"]) > 32 for v in values):
+        raise StoreError(f"record holds more than {MAX_VALUES} values or an over-long name or unit")
+    for key in ("runner", "toolchains", "run"):
+        obj = record.get(key, {})
+        if not isinstance(obj, dict) or len(obj) > MAX_FIELDS or not all(
+                isinstance(k, str) and isinstance(v, str) and len(k) <= 128 and len(v) <= MAX_TEXT
+                for k, v in obj.items()):
+            raise StoreError(f"record {key} must be an object of at most {MAX_FIELDS} short strings")
+    for key in ("target", "error", "committed_at", "recorded_at"):
+        if record.get(key) is not None and (not isinstance(record[key], str) or len(record[key]) > MAX_TEXT):
+            raise StoreError(f"record {key} must be a string of at most {MAX_TEXT} characters")
     if "detail" in record:
         _check_detail(record["detail"])
     return record

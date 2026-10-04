@@ -102,7 +102,7 @@ jobs:
           test "$(qqperf history --store .qq/new --repo "$REPO" --metric "$METRIC" --json \
             | python -c 'import json, sys; print(json.load(sys.stdin)[0]["status"])')" = ok
           qqperf bundle --store .qq/new --repo "$REPO" --metric "$METRIC" --results-backend local \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --results-out .qq/results
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" --results-out .qq/results
           for b in .qq/results/qq-results-*; do qqresults show "$b"; cat "$b/results.jsonl"; done
   # One stable name for the required checks: matrix legs report under per-leg names.
   measure-result:

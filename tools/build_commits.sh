@@ -16,7 +16,7 @@ node_version=$(node --version | sed 's/^v//')
 pnpm_version=$(pnpm --version)
 run=()
 if [ -n "${GITHUB_RUN_ID:-}" ]; then
-  run=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+  run=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")
 fi
 for commit in "$@"; do
   echo "::group::${repo} ${commit}"

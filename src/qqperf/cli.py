@@ -9,6 +9,7 @@
     qqperf manifest --base PATH --target T --params JSON --out PATH
     qqperf history --store DIR --repo NAME [--metric M] [--value NAME] [--json]
     qqperf merge --store DIR --from DIR --repo NAME... [--metric M]... [--commit SHA]... [--run-url URL]
+                 [--max-records N]
     qqperf bundle --store DIR --repo NAME --metric M --run-url URL --results-out DIR
 
 `pending` lists the commits of a branch (first parent, newest first) with no ok record that have
@@ -149,13 +150,13 @@ def cmd_merge(args) -> int:
         if repo not in args.repo:
             raise StoreError(f"{args.source} has records for repo {repo!r}; this merge takes only"
                              f" {', '.join(args.repo)}")
+        if args.metric and metric not in args.metric:
+            raise StoreError(f"{args.source} has records for metric {metric!r}; this merge takes only"
+                             f" {', '.join(args.metric)}")
         for r in src.records(repo, metric):
             if r["repo"] != repo or r["metric"] != metric:
                 raise StoreError(f"{args.source}/{repo}/{metric}.jsonl holds a record for"
                                  f" {r['repo']!r} {r['metric']!r}; refusing the merge")
-            if args.metric and metric not in args.metric:
-                raise StoreError(f"{args.source} has records for metric {metric!r}; this merge takes only"
-                                 f" {', '.join(args.metric)}")
             if args.commit and r["commit"] not in args.commit:
                 raise StoreError(f"{repo} {metric} record for commit {r['commit']} was not pending in this"
                                  " run; refusing the merge")
@@ -163,6 +164,9 @@ def cmd_merge(args) -> int:
                 raise StoreError(f"{repo} {metric} record for {r['commit'][:12]} names run"
                                  f" {r.get('run', {}).get('url')!r}, not this run; refusing the merge")
             records.append(r)
+    if args.max_records is not None and len(records) > args.max_records:
+        raise StoreError(f"{args.source} holds {len(records)} records; this merge takes at most"
+                         f" {args.max_records}")
     n = dest.put_many(records)
     print(f"merged {n} record(s) into {args.store}")
     return 0
@@ -252,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--metric", action="append", help="a metric whose records may be merged (default: any)")
     p.add_argument("--commit", action="append", help="a commit whose records may be merged (default: any)")
     p.add_argument("--run-url", help="merge only records that name this run")
+    p.add_argument("--max-records", type=int, help="refuse a source with more records than this")
     p.add_argument("--backend", default="files")
     p.set_defaults(func=cmd_merge)
 

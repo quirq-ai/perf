@@ -136,7 +136,15 @@ def test_merge_takes_only_pending_commits_of_this_run(tmp_path, product_repo, ne
     assert cli.main([*merge, "--run-url", RUN + "0"]) == 1
     assert "not this run" in capsys.readouterr().err
     assert not history.exists()
-    assert cli.main([*merge, "--commit", landed[0], "--metric", "build-size", "--run-url", RUN]) == 0
+    # A ledger with more than one record is refused whole.
+    assert cli.main(["record", "build-size", "--store", str(scratch), "--repo", "innernet", "--checkout",
+                     str(product_repo), "--commit", landed[1], "--error", "x", "--runner", "x",
+                     "--run-url", RUN]) == 0
+    assert cli.main([*merge, "--max-records", "1"]) == 1
+    assert "at most 1" in capsys.readouterr().err
+    assert not history.exists()
+    assert cli.main([*merge, "--commit", landed[0], "--commit", landed[1], "--metric", "build-size",
+                     "--run-url", RUN, "--max-records", "2"]) == 0
 
 
 def test_merge_refuses_nan_and_negative_values(tmp_path, product_repo, next_dist, capsys):

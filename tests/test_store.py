@@ -58,7 +58,9 @@ def test_failed_is_retried_up_to_the_limit(tmp_path):
     ("values", [{"name": "x", "value": float("inf"), "unit": "b"}], "values"),
     ("run", "url", "run"), ("detail", {"samples": [1, -2]}, "samples"),
     ("detail", {"samples": [float("nan")]}, "samples"), ("detail", {"logs": []}, "detail"),
-    ("detail", {"paths": [1]}, "paths")])
+    ("detail", {"paths": [1]}, "paths"), ("target", "x" * 3000, "target"),
+    ("runner", {"label": "x" * 3000}, "runner"), ("toolchains", {"node": 24}, "toolchains"),
+    ("values", [{"name": f"v{i}", "value": 1, "unit": "b"} for i in range(65)], "values")])
 def test_bad_records_are_refused(tmp_path, field, value, match):
     r = rec()
     r[field] = value
