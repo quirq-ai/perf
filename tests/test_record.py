@@ -38,3 +38,15 @@ def test_first_parent_and_pending(product_repo):
 def test_git_error_is_actionable(tmp_path):
     with pytest.raises(record.RecordError, match="rev-list"):
         record.first_parent(tmp_path)
+
+
+def test_backlog():
+    landed = ["c3", "c2", "c1"]
+    assert record.backlog([], set(), True) == {"landed": 0, "pending": 0, "oldest_pending": None,
+                                               "falling_out": False}
+    assert record.backlog(landed, {"c3"}, False)["falling_out"] is False
+    # The window is cut short and its oldest commit (no record, or failed but still retried) waits.
+    out = record.backlog(landed, {"c3"}, True)
+    assert (out["pending"], out["oldest_pending"], out["falling_out"]) == (2, "c1", True)
+    # Done (measured, or failed MAX_ATTEMPTS times): nothing older was pending when it was taken.
+    assert record.backlog(landed, {"c1"}, True)["falling_out"] is False

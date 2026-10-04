@@ -107,13 +107,24 @@ jobs:
           commit=$(qqperf pending --store .qq/data --repo "$REPO" --metric "$METRIC" --checkout .qq/product --limit 1)
           echo "pending: ${commit:-none}"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
-          # Make the backlog visible: one commit is measured per run, newest first, from the last
-          # 50 on main, so a busy day leaves older commits unmeasured once they pass that window.
+      # Make the backlog visible: one commit is measured per run, newest first, from the last 50 on
+      # main, so a burst of commits leaves older ones unmeasured once they pass that window. Only a
+      # report, so it never stops the measurement. Counted before this run's measurement.
+      - name: the backlog
+        continue-on-error: true
+        env:
+          REPO: ${{ matrix.repo }}
+          METRIC: ${{ matrix.metric }}
+        run: |
           backlog=$(qqperf backlog --store .qq/data --repo "$REPO" --metric "$METRIC" --checkout .qq/product)
           echo "backlog: $backlog"
           echo "$REPO $METRIC backlog: \`$backlog\`" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$(jq -r .falling_out <<<"$backlog")" = true ]; then
-            echo "::warning::$REPO $METRIC: $(jq -r .pending <<<"$backlog") of the last $(jq -r .landed <<<"$backlog") commits on main have no record; older commits are no longer measured"
+          falling_out=$(jq -r .falling_out <<<"$backlog")
+          pending=$(jq -r .pending <<<"$backlog")
+          landed=$(jq -r .landed <<<"$backlog")
+          # With one pending, this run measures it: nothing falls out.
+          if [ "$falling_out" = true ] && [ "$pending" -gt 1 ]; then
+            echo "::warning::$REPO $METRIC: $pending of the last $landed commits on main are still to be measured; older commits are no longer measured"
           fi
       - name: measure it
         id: measure
