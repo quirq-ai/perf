@@ -69,7 +69,7 @@ def first_parent(checkout: Path, ref: str = "HEAD") -> list[str]:
 
 
 def commit_time(checkout: Path, commit: str) -> str:
-    return _git(checkout, "show", "-s", "--format=%cI", commit).strip()
+    return _git(checkout, "show", "-s", "--format=%cI", "--end-of-options", commit).strip()
 
 
 def pending(landed: Iterable[str], recorded: set[str], limit: int) -> list[str]:

@@ -20,6 +20,8 @@ def next_dist(tmp_path) -> Path:
         "server/app/page.js": "s" * 1000,
         "cache/big.bin": "c" * 5000,
         "trace": "t" * 700,
+        "build/chunks/x.js": "b" * 400,
+        "types/routes.d.ts": "t" * 30,
         "build-manifest.json": json.dumps({"polyfillFiles": ["static/chunks/poly.js"],
                                            "rootMainFiles": ["static/chunks/main.js", "static/chunks/missing.js"]}),
     }

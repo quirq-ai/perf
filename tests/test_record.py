@@ -32,7 +32,7 @@ def test_first_parent_and_pending(product_repo):
     assert len(landed) == 3  # the feature commit is not on main's first-parent line
     assert record.pending(landed, {landed[0]}, 10) == landed[1:]
     assert record.pending(landed, set(), 1) == landed[:1]
-    assert record.commit_time(product_repo, landed[0]).startswith(str(dt.date.today().year))
+    assert dt.datetime.fromisoformat(record.commit_time(product_repo, landed[0])).tzinfo is not None
 
 
 def test_git_error_is_actionable(tmp_path):

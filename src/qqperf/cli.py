@@ -5,13 +5,14 @@
                   [--commit SHA] [--target T] [--toolchain NAME=VERSION]... [--run-url URL]
                   [--error TEXT]
     qqperf history --store DIR --repo NAME [--metric M] [--value NAME] [--json]
-    qqperf merge --store DIR --from DIR
+    qqperf merge --store DIR --from DIR --repo NAME...
 
-`pending` lists the commits of a branch (first parent, newest first) that have no record yet.
-`record build-size` measures a finished Next.js build and stores one write-once record; with
-`--error` it stores a failed record instead, so the history shows the gap. `merge` adds every
-record of one store to another, so a job that builds untrusted code never holds write access to
-the history: it records into a scratch store that a separate job merges.
+`pending` lists the commits of a branch (first parent, newest first) with no ok record that have
+not yet failed MAX_ATTEMPTS times. `record build-size` measures a finished Next.js build and stores
+one record; with `--error` it stores a failed record instead, so the history shows the gap.
+`merge` adds the records of one store to another, so a job that builds untrusted code never holds
+write access to the history: it records into a scratch store that a separate job merges, and the
+merge validates every record, only for the repos it is told to take, before writing any.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import sys
 from pathlib import Path
 
 from qqperf import __version__, record, size
-from qqperf.store import StoreError, open_store
+from qqperf.store import StoreError, check_commit, open_store
 
 BUILD_SIZE = "build-size"
 
@@ -31,7 +32,7 @@ def _store(args):
 
 
 def cmd_pending(args) -> int:
-    recorded = _store(args).commits(args.repo, args.metric)
+    recorded = _store(args).done(args.repo, args.metric)
     for c in record.pending(record.first_parent(Path(args.checkout), args.ref), recorded, args.limit):
         print(c)
     return 0
@@ -49,7 +50,7 @@ def _toolchains(values: list[str]) -> dict[str, str]:
 
 def cmd_record_build_size(args) -> int:
     checkout = Path(args.checkout)
-    commit = args.commit or record.first_parent(checkout, "HEAD")[0]
+    commit = check_commit(args.commit or record.first_parent(checkout, "HEAD")[0])
     values, error = None, args.error
     if error is None:
         values = size.next_build(Path(args.dist))
@@ -86,11 +87,17 @@ def cmd_history(args) -> int:
 
 def cmd_merge(args) -> int:
     dest, src = open_store(args.backend, Path(args.store)), open_store(args.backend, Path(args.source))
-    n = 0
+    records = []
     for repo, metric in src.streams():
+        if repo not in args.repo:
+            raise StoreError(f"{args.source} has records for repo {repo!r}; this merge takes only"
+                             f" {', '.join(args.repo)}")
         for r in src.records(repo, metric):
-            dest.put(r)
-            n += 1
+            if r["repo"] != repo or r["metric"] != metric:
+                raise StoreError(f"{args.source}/{repo}/{metric}.jsonl holds a record for"
+                                 f" {r['repo']!r} {r['metric']!r}; refusing the merge")
+            records.append(r)
+    n = dest.put_many(records)
     print(f"merged {n} record(s) into {args.store}")
     return 0
 
@@ -136,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("merge", help="add every record of one store to another")
     p.add_argument("--store", required=True, help="the store to add to")
     p.add_argument("--from", dest="source", required=True, help="the store to read")
+    p.add_argument("--repo", action="append", required=True, help="a repo whose records may be merged")
     p.add_argument("--backend", default="files")
     p.set_defaults(func=cmd_merge)
 

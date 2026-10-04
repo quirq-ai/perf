@@ -4,7 +4,9 @@
 # recipes' node-app adapter. History is JSON Lines on this repo's `perf-data` branch
 # (`innernet/build-size.jsonl`). The job that builds innernet's code has read access only; a
 # separate job with write access merges its records.
-# TODO(expert): trigger from innernet's post-submit (V0-GAR-01) instead of polling.
+# TODO(expert): trigger from innernet's post-submit (V0-GAR-01) instead of polling, and read the
+# repos to measure from infra-config repos.toml via qqcfg instead of naming innernet here.
+# GitHub turns off scheduled workflows after 60 days without repo activity; re-enable it then.
 name: build-size
 on:
   schedule:
@@ -14,8 +16,6 @@ on:
       limit:
         description: "Most commits to build in this run"
         default: "5"
-  push:
-    branches: [main]
 concurrency:
   group: perf-data  # one writer of the history at a time
   cancel-in-progress: false
@@ -41,9 +41,13 @@ jobs:
       - name: history so far
         run: |
           mkdir -p .qq/data
-          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null; then
+          # Exit code 2 means no such branch yet; any other failure stops the run.
+          rc=0; git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null || rc=$?
+          if [ "$rc" = 0 ]; then
             git fetch --quiet --depth 1 origin "$DATA_BRANCH"
-            git --work-tree=.qq/data checkout FETCH_HEAD -- .
+            git archive FETCH_HEAD | tar -x -C .qq/data
+          elif [ "$rc" != 2 ]; then
+            exit "$rc"
           fi
       - uses: actions/checkout@v7
         with:
@@ -74,18 +78,20 @@ jobs:
           commits=$(qqperf pending --store .qq/data --repo innernet --checkout .qq/innernet --limit "$LIMIT")
           echo "pending: ${commits:-none}"
           if [ -n "$commits" ]; then
+            # Set first, so records made before a timeout or crash are still stored.
+            echo "recorded=true" >> "$GITHUB_OUTPUT"
             tools/build_commits.sh .qq/innernet .qq/sync/tests/fixtures/innernet.repo.toml .qq/new \
               innernet "$RUNNER_LABEL" $commits
-            echo "recorded=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/upload-artifact@v7
-        if: steps.build.outputs.recorded == 'true'
+        if: always() && steps.build.outputs.recorded == 'true'
         with:
           name: new-records
           path: .qq/new/
+          if-no-files-found: ignore
   store:
     needs: measure
-    if: needs.measure.outputs.recorded == 'true'
+    if: always() && needs.measure.outputs.recorded == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -97,24 +103,32 @@ jobs:
           python-version: "3.14.8"
       - run: python -m pip install --quiet -e .
       - uses: actions/download-artifact@v7
+        continue-on-error: true  # none when the build crashed before its first record
         with:
           name: new-records
           path: .qq/new
       - name: append to the history branch
         run: |
+          if [ -z "$(find .qq/new -name '*.jsonl' 2>/dev/null)" ]; then
+            echo "no records to store"; exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null; then
+          rc=0; git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null || rc=$?
+          if [ "$rc" = 0 ]; then
             git fetch --quiet --depth 1 origin "$DATA_BRANCH"
             git worktree add --quiet .qq/data FETCH_HEAD
             git -C .qq/data checkout --quiet -B "$DATA_BRANCH"
+          elif [ "$rc" != 2 ]; then
+            exit "$rc"
           else
             git worktree add --quiet --orphan -b "$DATA_BRANCH" .qq/data
             printf '%s\n' "# perf-data" "" \
               "Perf history written by this repo's workflows (schema qq-perf-record/1), one JSON" \
               "Lines file per repo and metric. Write-once: never edit a line." > .qq/data/README.md
           fi
-          qqperf merge --store .qq/data --from .qq/new
+          # Only innernet's records: the artifact comes from a job that ran innernet's build.
+          qqperf merge --store .qq/data --from .qq/new --repo innernet
           git -C .qq/data add -A
           git -C .qq/data commit --quiet -m "build-size: $(find .qq/new -name '*.jsonl' -exec cat {} + | wc -l) record(s) from run ${GITHUB_RUN_ID}"
           git -C .qq/data push --quiet origin "HEAD:$DATA_BRANCH"

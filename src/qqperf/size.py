@@ -10,8 +10,9 @@ import gzip
 import json
 from pathlib import Path
 
-# Not build output: the incremental cache, traces and diagnostics vary from run to run.
-SKIP_TOP = frozenset({"cache", "trace", "trace-build", "diagnostics"})
+# Left out of total_bytes: the incremental cache, traces and diagnostics vary from run to run, and
+# build/ (bundler build-time chunks) and types/ are not served. Server source maps stay in.
+SKIP_TOP = frozenset({"cache", "trace", "trace-build", "diagnostics", "build", "types"})
 GROUPS = {"js": {".js", ".mjs"}, "css": {".css"}, "font": {".woff", ".woff2", ".ttf", ".otf"}}
 
 
@@ -55,24 +56,35 @@ def next_build(dist: Path) -> list[dict]:
     values["server_bytes"] = sum(p.stat().st_size for p in _files(server)) if server.is_dir() else 0
     values["total_bytes"] = sum(
         p.stat().st_size for p in _files(dist) if p.relative_to(dist).parts[0] not in SKIP_TOP)
-    shared = _shared_first_load(dist)
+    manifest = _build_manifest(dist)
+    shared = _js_size(dist, manifest.get("rootMainFiles", []))
     if shared is not None:
         values["shared_first_load_js_bytes"], values["shared_first_load_js_gzip_bytes"] = shared
+    polyfill = _js_size(dist, manifest.get("polyfillFiles", []))
+    if polyfill is not None:
+        values["polyfill_js_bytes"] = polyfill[0]
     return [{"name": k, "value": v, "unit": "files" if k.endswith("_files") else "bytes"}
             for k, v in values.items()]
 
 
-def _shared_first_load(dist: Path) -> tuple[int, int] | None:
-    """JS every route loads first: build-manifest's root main and polyfill files.
-
-    TODO(expert): per-route first-load JS; the manifests that list it change between Next majors.
-    """
+def _build_manifest(dist: Path) -> dict:
     try:
         manifest = json.loads((dist / "build-manifest.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return {}
+    return manifest if isinstance(manifest, dict) else {}
+
+
+def _js_size(dist: Path, names) -> tuple[int, int] | None:
+    """Raw and gzipped bytes of the listed build-manifest files that exist.
+
+    rootMainFiles is the JS every route loads first, as Next's "First Load JS shared by all";
+    polyfillFiles load only in browsers without module support, so they are counted apart.
+    TODO(expert): per-route first-load JS; the manifests that list it change between Next majors.
+    """
+    if not isinstance(names, list):
         return None
-    names = list(dict.fromkeys([*manifest.get("polyfillFiles", []), *manifest.get("rootMainFiles", [])]))
-    paths = [dist / n for n in names if (dist / n).is_file()]
+    paths = [dist / n for n in dict.fromkeys(names) if isinstance(n, str) and (dist / n).is_file()]
     if not paths:
         return None
     return sum(p.stat().st_size for p in paths), sum(_gzip_size(p) for p in paths)

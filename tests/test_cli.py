@@ -27,7 +27,8 @@ def test_pending_record_history(tmp_path, product_repo, next_dist, capsys):
     capsys.readouterr()
 
     assert cli.main(["pending", *base, "--checkout", str(product_repo)]) == 0
-    assert capsys.readouterr().out.split() == [landed[2]]
+    # The failed commit is retried until it has failed MAX_ATTEMPTS times.
+    assert capsys.readouterr().out.split() == [landed[1], landed[2]]
 
     assert cli.main(["history", *base]) == 0
     lines = capsys.readouterr().out.splitlines()
@@ -42,7 +43,7 @@ def test_record_twice_is_refused(tmp_path, product_repo, next_dist, capsys):
             str(product_repo), "--dist", str(next_dist), "--runner", "x"]
     assert cli.main(args) == 0
     assert cli.main(args) == 1
-    assert "write-once" in capsys.readouterr().err
+    assert "never replaced" in capsys.readouterr().err
 
 
 def test_record_needs_dist_or_error(tmp_path, product_repo):
@@ -56,9 +57,25 @@ def test_merge(tmp_path, product_repo, next_dist, capsys):
     base = ["record", "build-size", "--repo", "innernet", "--checkout", str(product_repo), "--dist",
             str(next_dist), "--runner", "x"]
     assert cli.main([*base, "--store", str(scratch)]) == 0
-    assert cli.main(["merge", "--store", str(history), "--from", str(scratch)]) == 0
+    merge = ["merge", "--store", str(history), "--repo", "innernet"]
+    assert cli.main([*merge, "--from", str(scratch)]) == 0
     assert "merged 1 record" in capsys.readouterr().out
     assert (history / "innernet" / "build-size.jsonl").read_text() == (scratch / "innernet" / "build-size.jsonl").read_text()
-    # Merging the same records again is refused: history is write-once.
-    assert cli.main(["merge", "--store", str(history), "--from", str(scratch)]) == 1
-    assert cli.main(["merge", "--store", str(history), "--from", str(tmp_path / "none")]) == 0
+    # Merging the same records again is refused: an ok record is never replaced.
+    assert cli.main([*merge, "--from", str(scratch)]) == 1
+    assert cli.main([*merge, "--from", str(tmp_path / "none")]) == 0
+
+
+def test_merge_refuses_other_repos_and_mislabelled_records(tmp_path, product_repo, next_dist, capsys):
+    scratch, history = tmp_path / "scratch", tmp_path / "history"
+    assert cli.main(["record", "build-size", "--store", str(scratch), "--repo", "innernet", "--checkout",
+                     str(product_repo), "--dist", str(next_dist), "--runner", "x"]) == 0
+    merge = ["merge", "--store", str(history), "--from", str(scratch)]
+    assert cli.main([*merge, "--repo", "xo-space"]) == 1
+    assert "takes only xo-space" in capsys.readouterr().err
+    # A record whose own repo differs from the file it sits in is refused, not redirected.
+    f = scratch / "innernet" / "build-size.jsonl"
+    f.write_text(f.read_text().replace('"repo":"innernet"', '"repo":"xo-space"'))
+    assert cli.main([*merge, "--repo", "innernet"]) == 1
+    assert "refusing the merge" in capsys.readouterr().err
+    assert not history.exists()
