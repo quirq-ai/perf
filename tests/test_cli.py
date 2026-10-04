@@ -61,7 +61,11 @@ def test_merge(tmp_path, product_repo, next_dist, capsys):
     assert cli.main([*merge, "--from", str(scratch)]) == 0
     assert "merged 1 record" in capsys.readouterr().out
     assert (history / "innernet" / "build-size.jsonl").read_text() == (scratch / "innernet" / "build-size.jsonl").read_text()
-    # Merging the same records again is refused: an ok record is never replaced.
+    # Merging the same records again changes nothing; a different ok record for the commit is refused.
+    assert cli.main([*merge, "--from", str(scratch)]) == 0
+    assert "merged 0 record" in capsys.readouterr().out
+    f = scratch / "innernet" / "build-size.jsonl"
+    f.write_text(f.read_text().replace('"label":"x"', '"label":"y"'))
     assert cli.main([*merge, "--from", str(scratch)]) == 1
     assert cli.main([*merge, "--from", str(tmp_path / "none")]) == 0
 
@@ -144,7 +148,9 @@ def test_merge_takes_only_pending_commits_of_this_run(tmp_path, product_repo, ne
     assert "at most 1" in capsys.readouterr().err
     assert not history.exists()
     assert cli.main([*merge, "--commit", landed[0], "--commit", landed[1], "--metric", "build-size",
-                     "--run-url", RUN, "--max-records", "2"]) == 0
+                     "--run-url-prefix", RUN, "--max-records", "2"]) == 0
+    # A later attempt of the same run finds them stored: skipped, not refused, though no longer pending.
+    assert cli.main([*merge, "--commit", "0" * 40, "--run-url-prefix", RUN, "--max-records", "0"]) == 0
 
 
 def test_merge_refuses_nan_and_negative_values(tmp_path, product_repo, next_dist, capsys):

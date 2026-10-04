@@ -191,12 +191,13 @@ jobs:
               "Lines file per repo and metric. Write-once: never edit a line." > .qq/data/README.md
           fi
           # Each ledger came from a job that ran one repo's code. Take at most one record from it:
-          # for that leg's repo and metric, for the newest commit still pending on the repo's main
-          # (the one the leg was to measure), naming this run attempt. A refused ledger only delays
-          # its commit to a later run. Artifact names are not bound to the job that uploads them,
+          # for that leg's repo and metric, for one of the newest three commits still pending on
+          # the repo's main (the leg took the newest; main may have moved since), naming this run
+          # (any attempt; one an earlier attempt already stored is skipped). A refused ledger only
+          # delays its commit to a later run. Artifact names are not bound to the job that uploads them,
           # so a compromised leg can still claim one commit of another leg per run.
           # TODO(expert): isolate each repo's measurement in its own workflow run.
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/"
           refused=0
           for dir in .qq/new/ledger--*; do
             name=${dir##*/ledger--}
@@ -210,11 +211,13 @@ jobs:
               echo "::error::cannot clone $repo; ledger $name not stored"; refused=1; continue
             fi
             if ! newest=$(qqperf pending --store .qq/data --repo "$repo" --metric "$metric" \
-                            --checkout ".qq/repos/$repo" --limit 1); then
+                            --checkout ".qq/repos/$repo" --limit 3); then
               echo "::error::cannot list pending commits of $repo; ledger $name not stored"; refused=1; continue
             fi
-            if [ -z "$newest" ] || ! qqperf merge --store .qq/data --from "$dir" --repo "$repo" \
-                --metric "$metric" --run-url "$run_url" --commit "$newest" --max-records 1; then
+            allowed=()
+            for c in $newest; do allowed+=(--commit "$c"); done
+            if [ ${#allowed[@]} = 0 ] || ! qqperf merge --store .qq/data --from "$dir" --repo "$repo" \
+                --metric "$metric" --run-url-prefix "$run_url" "${allowed[@]}" --max-records 1; then
               echo "::error::ledger $name refused"; refused=1
             fi
           done
