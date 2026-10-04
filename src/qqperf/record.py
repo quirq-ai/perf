@@ -28,8 +28,9 @@ def runner(label: str, backend: str) -> dict:
 def make(*, repo: str, commit: str, metric: str, target: str, values: list[dict] | None,
          runner_info: Mapping, toolchains: Mapping[str, str] | None = None,
          committed_at: str | None = None, run: Mapping | None = None, error: str | None = None,
-         now: _dt.datetime | None = None) -> dict:
-    """A record. With `error` it records a failed measurement, so history shows the gap."""
+         detail: Mapping | None = None, now: _dt.datetime | None = None) -> dict:
+    """A record. With `error` it records a failed measurement, so history shows the gap.
+    `detail` keeps what the summary values lose, such as a benchmark's raw samples."""
     if (values is None) == (error is None):
         raise RecordError("a record has either values or an error, not both or neither")
     for v in values or []:
@@ -51,6 +52,8 @@ def make(*, repo: str, commit: str, metric: str, target: str, values: list[dict]
     }
     if error is not None:
         record["error"] = error[:2000]
+    if detail:
+        record["detail"] = dict(detail)
     return record
 
 

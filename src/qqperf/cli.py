@@ -3,23 +3,26 @@
     qqperf pending --store DIR --repo NAME --checkout PATH [--metric M] [--ref REF] [--limit N]
     qqperf record build-size --store DIR --repo NAME --checkout PATH --dist DIR --runner LABEL
                   [--commit SHA] [--target T] [--toolchain NAME=VERSION]... [--run-url URL]
-                  [--error TEXT] [--results-out DIR]
+                  [--error TEXT]
     qqperf record bench --store DIR --repo NAME --checkout PATH --benchmark NAME --target T
                   --bench-dir DIR --runner LABEL [same options as build-size]
     qqperf manifest --base PATH --target T --params JSON --out PATH
     qqperf history --store DIR --repo NAME [--metric M] [--value NAME] [--json]
-    qqperf merge --store DIR --from DIR --repo NAME...
+    qqperf merge --store DIR --from DIR --repo NAME... [--metric M]... [--commit SHA]... [--run-url URL]
+    qqperf bundle --store DIR --repo NAME --metric M --run-url URL --results-out DIR
 
 `pending` lists the commits of a branch (first parent, newest first) with no ok record that have
 not yet failed MAX_ATTEMPTS times. `record build-size` measures a finished Next.js build and stores
 one record; with `--error` it stores a failed record instead, so the history shows the gap.
 `record bench` stores what recipes' `bench` capability measured (a failed benchmark is a failed
-record). With `--results-out`, a record is also written as a test-pipelines results bundle: a Run
-with one Result whose metrics hold the values (V0-PRF-01). `manifest` adds benchmark params to a
+record). `bundle` writes the record one run added as a test-pipelines results bundle: a Run with
+one Result whose metrics hold the values (V0-PRF-01). It runs only on records a trusted job has
+merged, never in a job that ran product code. `manifest` adds benchmark params to a
 target through qqsync's editor, until the product repos' own manifests carry them.
 `merge` adds the records of one store to another, so a job that builds untrusted code never holds
 write access to the history: it records into a scratch store that a separate job merges, and the
-merge validates every record, only for the repos it is told to take, before writing any.
+merge validates every record, only for the repos, metrics, commits and run it is told to take,
+before writing any.
 """
 from __future__ import annotations
 
@@ -57,25 +60,14 @@ def _toolchains(values: list[str]) -> dict[str, str]:
 
 
 def _record(args, metric: str, values, error, detail: dict | None = None) -> int:
-    """Store one record, and write it as a results bundle when --results-out is given. The bundle
-    comes first: a record in the ledger is never measured again, so it must not exist without one.
-    `detail` (raw samples and such) goes into the bundle's Result only."""
+    """Store one record. `detail` keeps what the summary values lose (a benchmark's raw samples)."""
     checkout = Path(args.checkout)
     commit = check_commit(args.commit or record.first_parent(checkout, "HEAD")[0])
     rec = record.make(
         repo=args.repo, commit=commit, metric=metric, target=args.target, values=values,
         error=error, runner_info=record.runner(args.runner, args.runner_backend),
         toolchains=_toolchains(args.toolchain), committed_at=record.commit_time(checkout, commit),
-        run={"url": args.run_url} if args.run_url else {})
-    out = None
-    if args.results_out:
-        from qqresults.errors import Error as ResultsError  # only the results path needs qqresults
-        from qqperf import results
-        try:
-            out = results.write_bundle(rec, Path(args.results_out), backend=args.results_backend,
-                                       org=args.org, detail=detail)
-        except ResultsError as e:
-            raise record.RecordError(f"results bundle not written, so nothing was recorded: {e}") from None
+        run={"url": args.run_url} if args.run_url else {}, detail=detail)
     path = _store(args).put(rec)
     if error is None:
         shown = ", ".join(f"{v['name']}={v['value']}{'' if v['unit'] in ('bytes', 'count') else v['unit']}"
@@ -83,11 +75,6 @@ def _record(args, metric: str, values, error, detail: dict | None = None) -> int
         print(f"recorded {args.repo} {commit[:12]} {metric}: {shown} -> {path}")
     else:
         print(f"recorded {args.repo} {commit[:12]} {metric}: failed -> {path}")
-    if out is not None:
-        print(f"results bundle: {out}")
-        if args.github_output:
-            with open(args.github_output, "a", encoding="utf-8") as f:
-                f.write(f"bundle={out}\nname={out.name}\n")
     return 0
 
 
@@ -101,7 +88,7 @@ def cmd_record_bench(args) -> int:
     if error is None:
         try:
             values, data = bench.read(Path(args.bench_dir), args.target)
-            detail = {k: data.get(k) for k in ("measure", "paths", "unit", "samples")}
+            detail = {k: data[k] for k in ("measure", "paths", "unit", "samples") if k in data}
         except bench.BenchError as e:
             error = str(e)  # a failed benchmark is recorded as failed, like a failed build
     return _record(args, args.benchmark, values, error, detail)
@@ -166,9 +153,40 @@ def cmd_merge(args) -> int:
             if r["repo"] != repo or r["metric"] != metric:
                 raise StoreError(f"{args.source}/{repo}/{metric}.jsonl holds a record for"
                                  f" {r['repo']!r} {r['metric']!r}; refusing the merge")
+            if args.metric and metric not in args.metric:
+                raise StoreError(f"{args.source} has records for metric {metric!r}; this merge takes only"
+                                 f" {', '.join(args.metric)}")
+            if args.commit and r["commit"] not in args.commit:
+                raise StoreError(f"{repo} {metric} record for commit {r['commit']} was not pending in this"
+                                 " run; refusing the merge")
+            if args.run_url and r.get("run", {}).get("url") != args.run_url:
+                raise StoreError(f"{repo} {metric} record for {r['commit'][:12]} names run"
+                                 f" {r.get('run', {}).get('url')!r}, not this run; refusing the merge")
             records.append(r)
     n = dest.put_many(records)
     print(f"merged {n} record(s) into {args.store}")
+    return 0
+
+
+def cmd_bundle(args) -> int:
+    """Write the record a run added for one repo and metric as a test-pipelines results bundle."""
+    from qqresults.errors import Error as ResultsError  # only this command needs qqresults
+    from qqperf import results
+    found = [r for r in _store(args).records(args.repo, args.metric)
+             if r.get("run", {}).get("url") == args.run_url]
+    if not found:
+        print(f"no {args.repo} {args.metric} record from {args.run_url}")
+        return 0
+    if len(found) > 1:
+        raise StoreError(f"{len(found)} {args.repo} {args.metric} records from {args.run_url}; expected one")
+    try:
+        out = results.write_bundle(found[0], Path(args.results_out), backend=args.results_backend, org=args.org)
+    except ResultsError as e:
+        raise StoreError(f"results bundle not written: {e}") from None
+    print(f"results bundle: {out}")
+    if args.github_output:
+        with open(args.github_output, "a", encoding="utf-8") as f:
+            f.write(f"bundle={out}\nname={out.name}\n")
     return 0
 
 
@@ -203,11 +221,6 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--toolchain", action="append", default=[], metavar="NAME=VERSION")
         p.add_argument("--run-url")
         p.add_argument("--error", help="record a failure with this message instead of values")
-        p.add_argument("--results-out", help="also write the record as a test-pipelines results bundle here")
-        p.add_argument("--results-backend", default="github", choices=("github", "local"),
-                       help="who describes the bundle's run (github: this Actions job)")
-        p.add_argument("--org", default="quirq-ai", help="owner of --repo, for the bundle's run")
-        p.add_argument("--github-output", help="append bundle=PATH and name=NAME here")
         return p
 
     p = with_record(rsub.add_parser(BUILD_SIZE, help="size of a finished Next.js build"), "app")
@@ -236,8 +249,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--store", required=True, help="the store to add to")
     p.add_argument("--from", dest="source", required=True, help="the store to read")
     p.add_argument("--repo", action="append", required=True, help="a repo whose records may be merged")
+    p.add_argument("--metric", action="append", help="a metric whose records may be merged (default: any)")
+    p.add_argument("--commit", action="append", help="a commit whose records may be merged (default: any)")
+    p.add_argument("--run-url", help="merge only records that name this run")
     p.add_argument("--backend", default="files")
     p.set_defaults(func=cmd_merge)
+
+    p = with_store(sub.add_parser("bundle", help="write a run's record as a results bundle"))
+    p.add_argument("--metric", required=True)
+    p.add_argument("--run-url", required=True, help="the run that added the record")
+    p.add_argument("--results-out", required=True, help="the directory to write the bundle in")
+    p.add_argument("--results-backend", default="github", choices=("github", "local"),
+                   help="who describes the bundle's run (github: this Actions job)")
+    p.add_argument("--org", default="quirq-ai", help="owner of --repo, for the bundle's run")
+    p.add_argument("--github-output", help="append bundle=PATH and name=NAME here")
+    p.set_defaults(func=cmd_bundle)
 
     args = ap.parse_args(argv)
     if args.cmd == "record" and args.metric == BUILD_SIZE and args.error is None and not args.dist:

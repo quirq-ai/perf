@@ -16,6 +16,9 @@ records numbers; it does not alert or bisect.
   repo and commit with one Result (`perf::<metric>`) whose `metrics` hold the values as
   `{value, unit}`, and a `raw` JSON with the runner type, toolchains and any raw samples. Its
   scorecard workflow collects them into the results store (V0-TST-02).
+- v0 numbers are a record, not a regression signal: one measurement per commit on shared runners,
+  few samples, no baseline run beside it. Do not gate or alert on them; that needs v1's repeated,
+  A/B runs.
 
 Plan and every v0 item: [quirq-ai/infra-config](https://github.com/quirq-ai/infra-config),
 `docs/plan.md` and `docs/v0.md`.
@@ -37,20 +40,29 @@ the pinned Python, Node and pnpm. A failed build or benchmark is recorded as fai
 later runs, up to three failed records per commit. GitHub turns off a scheduled workflow after 60
 days without repo activity; re-enable it in the Actions tab.
 
-Each record goes two places. The results bundle (a `qq-results-*` artifact) is the system of
-record. This repo's [`perf-data`](../../tree/perf-data) branch keeps the same records as JSON
-Lines, one file per repo and metric (schema `qq-perf-record/1`); it is also how a run knows what
-is already measured. Lines are never edited, and a commit gets at most one `ok` record. Jobs that
-run product code have read access only; a separate job validates their records, takes only the
-measured repo's, and pushes.
+Each record goes two places. This repo's [`perf-data`](../../tree/perf-data) branch keeps the
+records as JSON Lines, one file per repo and metric (schema `qq-perf-record/1`); it is also how a
+run knows what is already measured. Lines are never edited, and a commit gets at most one `ok`
+record. The results store is the system of record: `.github/workflows/perf-publish.yml` turns the
+records each perf run stored into results bundles (`qq-results-*` artifacts) for the scorecard to
+collect.
+
+Trust: the `measure` jobs run product code and its dependencies, so they get read access only and
+their records are claims. They upload only a ledger. The `store` job, which runs no product code,
+accepts a ledger only for its own leg's repo and metric, only for commits still pending on that
+repo's `main`, only for records naming this run, and only finite values of at least 0, then pushes
+`perf-data`. perf-publish runs after perf completes, from the default branch, reads only
+`perf-data`, and is the only workflow that uploads results bundles; test-pipelines collects perf
+bundles from it alone.
 
 ```sh
 qqperf pending --store DIR --repo innernet --checkout PATH        # landed commits with no record
 qqperf record build-size --store DIR --repo innernet --checkout PATH --dist PATH/.next --runner LABEL
 qqperf history --store DIR --repo innernet [--value static_js_gzip_bytes] [--json]
-qqperf merge --store DIR --from DIR --repo innernet
+qqperf merge --store DIR --from DIR --repo innernet [--metric M] [--commit SHA]... [--run-url URL]
 qqperf record bench --store DIR --repo xo-space --checkout PATH --benchmark xo-space-server-start \
-  --target server --bench-dir OUT/bench --runner LABEL [--results-out DIR]
+  --target server --bench-dir OUT/bench --runner LABEL
+qqperf bundle --store DIR --repo innernet --metric build-size --run-url URL --results-out DIR
 qqperf manifest --base repo.toml --target app --params '{"bench": {...}}' --out bench.toml
 ```
 
@@ -59,7 +71,7 @@ qqperf manifest --base repo.toml --target app --params '{"bench": {...}}' --out 
 | Item | What | PR | State |
 |---|---|---|---|
 | V0-PRF-02 | Build-size record for Next.js apps | #2 | merged; innernet history on [`perf-data`](../../blob/perf-data/innernet/build-size.jsonl) since run [37202550498](../../actions/runs/37202550498) |
-| V0-PRF-01 | `bench` capability and storage | recipes#10, #4 | in review |
+| V0-PRF-01 | `bench` capability and storage | recipes#10, #4, #5 | merged; first records from run [37204645471](../../actions/runs/37204645471), in test-pipelines' results store. Polls `main` until product post-submit exists (V0-GAR-01) |
 
 ## Working here
 

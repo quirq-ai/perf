@@ -1,0 +1,64 @@
+# Publish the records a perf run stored as test-pipelines results bundles (V0-PRF-01).
+#
+# The only source of perf's `qq-results-*` artifacts. It runs after perf.yml completes on main,
+# from the default branch's copy of this file, and runs no product code: it reads the records the
+# perf run's `store` job validated and pushed to `perf-data` (those naming that run) and writes
+# each as a bundle. test-pipelines' scorecard collects perf bundles only from runs of this
+# workflow (event workflow_run, branch main), so no job that ran product code can add results.
+name: perf-publish
+on:
+  workflow_run:
+    workflows: [perf]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+env:
+  DATA_BRANCH: perf-data
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The measurements of perf.yml's matrix.
+        include:
+          - {repo: innernet, metric: build-size}
+          - {repo: xo-space, metric: xo-space-server-start}
+          - {repo: innernet, metric: innernet-search}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.8"
+      - run: python -m pip install --quiet -e .
+      - name: the records stored so far
+        shell: bash
+        run: |
+          mkdir -p .qq/data
+          rc=0; git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null || rc=$?
+          if [ "$rc" = 0 ]; then
+            git fetch --quiet --depth 1 origin "$DATA_BRANCH"
+            git archive FETCH_HEAD | tar -x -C .qq/data
+          elif [ "$rc" != 2 ]; then
+            exit "$rc"
+          fi
+      - name: write the perf run's record as a results bundle
+        id: bundle
+        env:
+          REPO: ${{ matrix.repo }}
+          METRIC: ${{ matrix.metric }}
+          PERF_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          qqperf bundle --store .qq/data --repo "$REPO" --metric "$METRIC" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$PERF_RUN_ID" \
+            --results-out .qq/results --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        if: steps.bundle.outputs.name != ''
+        with:
+          name: ${{ steps.bundle.outputs.name }}
+          path: ${{ steps.bundle.outputs.bundle }}
+          if-no-files-found: error

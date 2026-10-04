@@ -81,47 +81,74 @@ def test_merge_refuses_other_repos_and_mislabelled_records(tmp_path, product_rep
     assert not history.exists()
 
 
-def test_record_bench_and_results_bundle(tmp_path, product_repo, capsys):
+RUN = "https://github.com/quirq-ai/perf/actions/runs/7"
+
+
+def test_record_bench_then_bundle(tmp_path, product_repo, capsys):
     from qqresults import bundle
     bench_dir = tmp_path / "out" / "bench"
     bench_dir.mkdir(parents=True)
     (bench_dir / "server.bench.serve.json").write_text(json.dumps(
         {"ok": True, "metrics": {"startup_p50": {"value": 1.25, "unit": "s"}}, "measure": "startup",
-         "paths": ["/"], "unit": "s", "samples": [1.2, 1.25, 1.3]}))
-    base = ["record", "bench", "--store", str(tmp_path / "store"), "--repo", "xo-space", "--checkout",
+         "paths": ["/"], "unit": "s", "samples": [1.2, 1.25, 1.3], "logs": ["x.log"]}))
+    store = tmp_path / "store"
+    base = ["record", "bench", "--store", str(store), "--repo", "xo-space", "--checkout",
             str(product_repo), "--benchmark", "xo-space-server-start", "--target", "server", "--runner", "x",
-            "--results-out", str(tmp_path / "results"), "--results-backend", "local",
-            "--github-output", str(tmp_path / "gh-out")]
+            "--run-url", RUN]
     assert cli.main([*base, "--bench-dir", str(bench_dir)]) == 0
-    out = capsys.readouterr().out
-    assert "startup_p50=1.25s" in out and "results bundle:" in out
+    assert "startup_p50=1.25s" in capsys.readouterr().out
+    [rec] = cli.open_store("files", store).records("xo-space", "xo-space-server-start")
+    assert rec["detail"] == {"measure": "startup", "paths": ["/"], "unit": "s", "samples": [1.2, 1.25, 1.3]}
+
+    out = ["bundle", "--store", str(store), "--repo", "xo-space", "--metric", "xo-space-server-start",
+           "--results-out", str(tmp_path / "results"), "--results-backend", "local",
+           "--github-output", str(tmp_path / "gh-out")]
+    assert cli.main([*out, "--run-url", RUN + "0"]) == 0  # another run's: nothing to write
+    assert not (tmp_path / "results").exists()
+    assert cli.main([*out, "--run-url", RUN]) == 0
     [path] = (tmp_path / "results").iterdir()
     b = bundle.read(path)
     assert b.run.repo == "quirq-ai/xo-space" and b.results[0].metrics["startup_p50"]["unit"] == "s"
     raw = json.loads(b.results[0].raw)
-    assert raw["samples"] == [1.2, 1.25, 1.3] and raw["runner"]["label"] == "x" and raw["target"] == "server"
+    assert raw["samples"] == [1.2, 1.25, 1.3] and raw["runner"]["label"] == "x" and raw["measured_in"] == RUN
     assert f"name={path.name}" in (tmp_path / "gh-out").read_text()
 
-    # A failed benchmark is a failed record, retried later.
+    # A failed benchmark is a failed record, retried later; now two records name the run.
     (bench_dir / "server.bench.serve.json").write_text(json.dumps({"ok": False, "detail": "never ready"}))
     landed = cli.record.first_parent(product_repo)
     assert cli.main([*base, "--bench-dir", str(bench_dir), "--commit", landed[1]]) == 0
-    rows = cli.open_store("files", tmp_path / "store").records("xo-space", "xo-space-server-start")
+    rows = cli.open_store("files", store).records("xo-space", "xo-space-server-start")
     assert [r["status"] for r in rows] == ["ok", "failed"] and "never ready" in rows[1]["error"]
+    assert cli.main([*out, "--run-url", RUN]) == 1
+    assert "expected one" in capsys.readouterr().err
 
 
-def test_no_ledger_record_without_its_bundle(tmp_path, product_repo, capsys, monkeypatch):
-    from qqresults.errors import Error
-    from qqperf import results
+def test_merge_takes_only_pending_commits_of_this_run(tmp_path, product_repo, next_dist, capsys):
+    scratch, history = tmp_path / "scratch", tmp_path / "history"
+    landed = cli.record.first_parent(product_repo)
+    assert cli.main(["record", "build-size", "--store", str(scratch), "--repo", "innernet", "--checkout",
+                     str(product_repo), "--dist", str(next_dist), "--runner", "x", "--run-url", RUN]) == 0
+    merge = ["merge", "--store", str(history), "--from", str(scratch), "--repo", "innernet"]
+    assert cli.main([*merge, "--commit", landed[1]]) == 1
+    assert "was not pending" in capsys.readouterr().err
+    assert cli.main([*merge, "--metric", "innernet-search"]) == 1
+    assert "takes only innernet-search" in capsys.readouterr().err
+    assert cli.main([*merge, "--run-url", RUN + "0"]) == 1
+    assert "not this run" in capsys.readouterr().err
+    assert not history.exists()
+    assert cli.main([*merge, "--commit", landed[0], "--metric", "build-size", "--run-url", RUN]) == 0
 
-    def broken(*a, **kw):
-        raise Error("GITHUB_RUN_ID is not set")
-    monkeypatch.setattr(results, "write_bundle", broken)
-    assert cli.main(["record", "bench", "--store", str(tmp_path / "store"), "--repo", "xo-space", "--checkout",
-                     str(product_repo), "--benchmark", "b", "--target", "server", "--runner", "x",
-                     "--error", "boom", "--results-out", str(tmp_path / "results")]) == 1
-    assert "nothing was recorded" in capsys.readouterr().err
-    assert cli.open_store("files", tmp_path / "store").records("xo-space", "b") == []
+
+def test_merge_refuses_nan_and_negative_values(tmp_path, product_repo, next_dist, capsys):
+    scratch = tmp_path / "scratch"
+    assert cli.main(["record", "build-size", "--store", str(scratch), "--repo", "innernet", "--checkout",
+                     str(product_repo), "--dist", str(next_dist), "--runner", "x"]) == 0
+    f = scratch / "innernet" / "build-size.jsonl"
+    good = f.read_text()
+    for bad in (good.replace('"value":', '"value":NaN,"x":', 1), good.replace('"value":', '"value":-', 1)):
+        f.write_text(bad)
+        assert cli.main(["merge", "--store", str(tmp_path / "h"), "--from", str(scratch), "--repo", "innernet"]) == 1
+        assert "not a valid record" in capsys.readouterr().err
 
 
 def test_record_bench_needs_a_target(tmp_path, product_repo):

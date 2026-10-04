@@ -5,12 +5,15 @@
 #   innernet-search        V0-PRF-01  latency of search requests on innernet's demo build
 #
 # Each measurement polls its repo's main and takes the newest commit that has no record yet, so a
-# backlog drains one commit per run (about 48 a day; a new metric backfills up to 49 old commits). Builds and benchmarks go through recipes' adapters (`build`,
-# `bench`). Every record is kept twice: as a test-pipelines results bundle (a `qq-results-*`
-# artifact, a Result whose metrics hold the values; the scorecard workflow collects it into the
-# results store), and on this repo's `perf-data` branch, which is also how a run knows what is
-# already measured. Jobs that run product code have read access only; one separate job with write
-# access merges their records and pushes.
+# backlog drains one commit per run (about 48 a day; a new metric backfills up to 49 old commits).
+# Builds and benchmarks go through recipes' adapters (`build`, `bench`).
+#
+# Trust: `measure` runs product code and its dependencies, so it holds read access only and its
+# output is a claim, not a record. It uploads only a ledger of records. `store`, which runs no
+# product code, accepts a ledger only for its own leg's repo and metric, only for commits that are
+# still pending and only for records naming this run, and pushes them to this repo's `perf-data`
+# branch. The results bundles for test-pipelines' store are built from perf-data afterwards by
+# perf-publish.yml, a separate workflow no job here can upload into.
 # TODO(expert): run inside each product repo's generated post-submit (V0-GAR-01) instead of
 # polling; read repos and benchmark params from infra-config (repos.toml, perf.toml) via qqcfg.
 # GitHub turns off scheduled workflows after 60 days without repo activity; re-enable it then.
@@ -115,9 +118,7 @@ jobs:
           PARAMS: ${{ matrix.params }}
           COMMIT: ${{ steps.pending.outputs.commit }}
           PYTHON_ROOT: ${{ steps.python.outputs.python-path }}
-          QQ_RESULTS_OUT: .qq/results
         run: |
-          export QQ_GITHUB_OUTPUT=$GITHUB_OUTPUT
           fixture=.qq/sync/tests/fixtures/$REPO.repo.toml
           if [ "$METRIC" = build-size ]; then
             tools/build_commits.sh .qq/product "$fixture" .qq/new "$REPO" "$RUNNER_LABEL" "$COMMIT"
@@ -131,12 +132,6 @@ jobs:
               tools/bench_commit.sh .qq/product "$fixture" "$TARGET" "$PARAMS" .qq/new "$REPO" "$METRIC" \
                 "$RUNNER_LABEL" "$COMMIT"
           fi
-      - uses: actions/upload-artifact@v7
-        if: always() && steps.measure.outputs.name != ''
-        with:
-          name: ${{ steps.measure.outputs.name }}
-          path: ${{ steps.measure.outputs.bundle }}
-          if-no-files-found: error
       - uses: actions/upload-artifact@v7
         if: failure() && steps.pending.outputs.commit != ''
         with:
@@ -193,12 +188,33 @@ jobs:
               "Perf history written by this repo's workflows (schema qq-perf-record/1), one JSON" \
               "Lines file per repo and metric. Write-once: never edit a line." > .qq/data/README.md
           fi
-          # Each ledger came from a job that ran one repo's code; take only that repo's records.
-          # TODO(expert): also accept only the commit that job listed as pending.
+          # Each ledger came from a job that ran one repo's code: take only that leg's repo and
+          # metric, only commits still pending on the repo's main, and only records naming this run.
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          refused=0
           for dir in .qq/new/ledger--*; do
             name=${dir##*/ledger--}
-            qqperf merge --store .qq/data --from "$dir" --repo "${name%%--*}"
+            repo=${name%%--*} metric=${name#*--}
+            case "$repo/$metric" in
+              innernet/build-size|innernet/innernet-search|xo-space/xo-space-server-start) ;;
+              *) echo "::error::unexpected ledger $name"; refused=1; continue ;;
+            esac
+            [ -d ".qq/repos/$repo" ] || git clone --quiet --filter=blob:none --no-checkout --depth 50 \
+              "https://github.com/quirq-ai/$repo" ".qq/repos/$repo"
+            allowed=()
+            for c in $(qqperf pending --store .qq/data --repo "$repo" --metric "$metric" \
+                         --checkout ".qq/repos/$repo" --limit 50); do
+              allowed+=(--commit "$c")
+            done
+            if [ ${#allowed[@]} = 0 ] || ! qqperf merge --store .qq/data --from "$dir" --repo "$repo" \
+                --metric "$metric" --run-url "$run_url" "${allowed[@]}"; then
+              echo "::error::ledger $name refused"; refused=1
+            fi
           done
+          if [ -z "$(git -C .qq/data status --porcelain)" ]; then
+            echo "nothing new to store"; exit "$refused"
+          fi
           git -C .qq/data add -A
-          git -C .qq/data commit --quiet -m "perf: $(find .qq/new -name '*.jsonl' -exec cat {} + | wc -l) record(s) from run ${GITHUB_RUN_ID}"
+          git -C .qq/data commit --quiet -m "perf: records from run ${GITHUB_RUN_ID}"
           git -C .qq/data push --quiet origin "HEAD:$DATA_BRANCH"
+          exit "$refused"
