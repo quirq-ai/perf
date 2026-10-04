@@ -20,3 +20,41 @@ jobs:
           python-version: "3.14.8"
       - run: python -m pip install --quiet -e ".[test]"
       - run: python -m pytest -q -p no:cacheprovider
+  # V0-PRF-02 end to end: build innernet through recipes' node-app adapter and record its size,
+  # with the same script the build-size workflow runs, into a scratch store.
+  build-size:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.8"
+      - run: python -m pip install --quiet -e ".[build]"
+      - uses: actions/checkout@v7
+        with:
+          repository: quirq-ai/innernet
+          ref: da9b84cf811f4358e3ee0b5d9d4388b69bf481e9  # TODO(expert): let rollers move this pin.
+          path: .qq/innernet
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: quirq-ai/sync
+          ref: 5abac76af194a40961074ce75432f4fdb79fe951
+          path: .qq/sync
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.21.0"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: "11.28.2"
+      - name: build innernet and record its size
+        run: |
+          tools/build_commits.sh .qq/innernet .qq/sync/tests/fixtures/innernet.repo.toml .qq/new \
+            innernet ubuntu-24.04 da9b84cf811f4358e3ee0b5d9d4388b69bf481e9
+          qqperf history --store .qq/new --repo innernet --json
+          # A failed build is recorded too; here it must have succeeded.
+          qqperf history --store .qq/new --repo innernet | grep -q bytes

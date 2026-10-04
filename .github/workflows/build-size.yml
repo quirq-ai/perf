@@ -1,0 +1,121 @@
+# V0-PRF-02: record the Next.js build output size of every commit that lands on innernet's main.
+#
+# Polls innernet's main and builds the commits that have no record yet, newest first, through
+# recipes' node-app adapter. History is JSON Lines on this repo's `perf-data` branch
+# (`innernet/build-size.jsonl`). The job that builds innernet's code has read access only; a
+# separate job with write access merges its records.
+# TODO(expert): trigger from innernet's post-submit (V0-GAR-01) instead of polling.
+name: build-size
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Most commits to build in this run"
+        default: "5"
+  push:
+    branches: [main]
+concurrency:
+  group: perf-data  # one writer of the history at a time
+  cancel-in-progress: false
+permissions:
+  contents: read
+env:
+  DATA_BRANCH: perf-data
+  RUNNER_LABEL: ubuntu-24.04
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      recorded: ${{ steps.build.outputs.recorded }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.8"
+      - run: python -m pip install --quiet -e ".[build]"
+      - name: history so far
+        run: |
+          mkdir -p .qq/data
+          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null; then
+            git fetch --quiet --depth 1 origin "$DATA_BRANCH"
+            git --work-tree=.qq/data checkout FETCH_HEAD -- .
+          fi
+      - uses: actions/checkout@v7
+        with:
+          repository: quirq-ai/innernet
+          ref: main
+          fetch-depth: 50
+          path: .qq/innernet
+          persist-credentials: false
+      # innernet's manifest until V0-ONB-02 lands infra/repo.toml there, from the sync commit recipes uses.
+      - uses: actions/checkout@v7
+        with:
+          repository: quirq-ai/sync
+          ref: 5abac76af194a40961074ce75432f4fdb79fe951
+          path: .qq/sync
+          persist-credentials: false
+      # Node and pnpm at the toolchains pins, as recipes' CI does, until V0-TCH-02 publishes them.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.21.0"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: "11.28.2"
+      - name: build and measure commits with no record
+        id: build
+        env:
+          LIMIT: ${{ inputs.limit || '5' }}
+        run: |
+          commits=$(qqperf pending --store .qq/data --repo innernet --checkout .qq/innernet --limit "$LIMIT")
+          echo "pending: ${commits:-none}"
+          if [ -n "$commits" ]; then
+            tools/build_commits.sh .qq/innernet .qq/sync/tests/fixtures/innernet.repo.toml .qq/new \
+              innernet "$RUNNER_LABEL" $commits
+            echo "recorded=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: steps.build.outputs.recorded == 'true'
+        with:
+          name: new-records
+          path: .qq/new/
+  store:
+    needs: measure
+    if: needs.measure.outputs.recorded == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.8"
+      - run: python -m pip install --quiet -e .
+      - uses: actions/download-artifact@v7
+        with:
+          name: new-records
+          path: .qq/new
+      - name: append to the history branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$DATA_BRANCH" >/dev/null; then
+            git fetch --quiet --depth 1 origin "$DATA_BRANCH"
+            git worktree add --quiet .qq/data FETCH_HEAD
+            git -C .qq/data checkout --quiet -B "$DATA_BRANCH"
+          else
+            git worktree add --quiet --orphan -b "$DATA_BRANCH" .qq/data
+            printf '%s\n' "# perf-data" "" \
+              "Perf history written by this repo's workflows (schema qq-perf-record/1), one JSON" \
+              "Lines file per repo and metric. Write-once: never edit a line." > .qq/data/README.md
+          fi
+          qqperf merge --store .qq/data --from .qq/new
+          git -C .qq/data add -A
+          git -C .qq/data commit --quiet -m "build-size: $(find .qq/new -name '*.jsonl' -exec cat {} + | wc -l) record(s) from run ${GITHUB_RUN_ID}"
+          git -C .qq/data push --quiet origin "HEAD:$DATA_BRANCH"
+          qqperf history --store .qq/data --repo innernet | tail -n 20
