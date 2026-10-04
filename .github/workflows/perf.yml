@@ -54,11 +54,11 @@ jobs:
               {"env": {"INNERNET_DEMO": "1"}, "bench": {"measure": "latency", "samples": 10, "warmup": 2,
               "paths": ["/search?q=build", "/search?q=quirq", "/search?q=readme"]}}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       # CPython 3.14.8, as the manifests pin, for qqperf and for xo-space itself.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         id: python
         with:
           python-version: "3.14.8"
@@ -75,7 +75,7 @@ jobs:
           elif [ "$rc" != 2 ]; then
             exit "$rc"
           fi
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: quirq-ai/${{ matrix.repo }}
           ref: main
@@ -83,18 +83,18 @@ jobs:
           path: .qq/product
           persist-credentials: false
       # The manifests until V0-ONB-01/02 land infra/repo.toml, from the sync commit recipes uses.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: quirq-ai/sync
           ref: 8f624f4a7fe3abdab2c7b83376f1ae7772073fd4
           path: .qq/sync
           persist-credentials: false
       # Node and pnpm at the toolchains pins, as recipes' CI does, until V0-TCH-02 is used.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         if: matrix.node
         with:
           node-version: "24.21.0"
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
         if: matrix.node
         with:
           version: "11.28.2"
@@ -140,7 +140,7 @@ jobs:
               tools/bench_commit.sh .qq/product "$fixture" "$TARGET" "$PARAMS" .qq/new "$REPO" "$METRIC" \
                 "$RUNNER_LABEL" "$COMMIT"
           fi
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         if: failure() && steps.pending.outputs.commit != ''
         with:
           # The service and step logs of a failed build or benchmark, which the record only points at.
@@ -150,7 +150,7 @@ jobs:
             ${{ runner.temp }}/qq-bench/out-*/logs/
           if-no-files-found: ignore
           overwrite: true
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         if: always() && steps.pending.outputs.commit != ''
         with:
           # ledger--<repo>--<metric>: the store job takes one record from each, for that repo and
@@ -167,17 +167,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      # No stored credentials: only the final push step gets the token, not pip, qqperf or the
+      # product clones, which all run before it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14.8"
       - run: python -m pip install --quiet -e .
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         continue-on-error: true  # none when no job had a commit to measure
         with:
           pattern: ledger--*
           path: .qq/new
       - name: append to the history branch
+        id: store
         shell: bash  # -eo pipefail
         run: |
           if [ -z "$(find .qq/new -name '*.jsonl' 2>/dev/null)" ]; then
@@ -229,10 +234,27 @@ jobs:
               echo "::error::ledger $name refused"; refused=1
             fi
           done
+          echo "refused=$refused" >> "$GITHUB_OUTPUT"
           if [ -z "$(git -C .qq/data status --porcelain)" ]; then
-            echo "nothing new to store"; exit "$refused"
+            echo "nothing new to store"; exit 0
           fi
           git -C .qq/data add -A
           git -C .qq/data commit --quiet -m "perf: records from run ${GITHUB_RUN_ID}"
-          git -C .qq/data push --quiet origin "HEAD:$DATA_BRANCH"
-          exit "$refused"
+          echo "push=1" >> "$GITHUB_OUTPUT"
+      - name: push the history branch
+        if: steps.store.outputs.push == '1'
+        shell: bash
+        env:
+          PUSH_TOKEN: ${{ github.token }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          # Through the environment, so the header never appears in a process's arguments.
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git -C .qq/data push --quiet origin "HEAD:$DATA_BRANCH"
+      - name: fail on refused ledgers
+        if: steps.store.outputs.refused == '1'
+        run: |
+          echo "::error::at least one ledger was refused; see the step above"
+          exit 1
