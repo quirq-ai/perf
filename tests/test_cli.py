@@ -28,8 +28,9 @@ def test_pending_record_history(tmp_path, product_repo, next_dist, capsys):
     capsys.readouterr()
 
     assert cli.main(["pending", *base, "--checkout", str(product_repo)]) == 0
-    # The failed commit is retried until it has failed MAX_ATTEMPTS times.
-    assert capsys.readouterr().out.split() == [landed[1], landed[2]]
+    # The failed commit is retried until it has failed MAX_ATTEMPTS times; the oldest commit landed
+    # before anything was recorded below it, so it is not owed a record.
+    assert capsys.readouterr().out.split() == [landed[1]]
 
     assert cli.main(["history", *base]) == 0
     lines = capsys.readouterr().out.splitlines()
