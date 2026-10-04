@@ -1,6 +1,7 @@
 """qqperf: record performance numbers per commit, raw and with units.
 
     qqperf pending --store DIR --repo NAME --checkout PATH [--metric M] [--ref REF] [--limit N]
+    qqperf backlog --store DIR --repo NAME --checkout PATH [--metric M] [--ref REF]
     qqperf record build-size --store DIR --repo NAME --checkout PATH --dist DIR --runner LABEL
                   [--commit SHA] [--target T] [--toolchain NAME=VERSION]... [--run-url URL]
                   [--error TEXT]
@@ -13,7 +14,9 @@
     qqperf bundle --store DIR --repo NAME --metric M --run-url URL --results-out DIR
 
 `pending` lists the commits of a branch (first parent, newest first) with no ok record that have
-not yet failed MAX_ATTEMPTS times. `record build-size` measures a finished Next.js build and stores
+not yet failed MAX_ATTEMPTS times. `backlog` prints, as JSON, how many of those there are among
+the commits the checkout holds and whether commits are falling out of a shallow checkout before
+they are measured. `record build-size` measures a finished Next.js build and stores
 one record; with `--error` it stores a failed record instead, so the history shows the gap.
 `record bench` stores what recipes' `bench` capability measured (a failed benchmark is a failed
 record). `bundle` writes the record one run added as a test-pipelines results bundle: a Run with
@@ -47,6 +50,14 @@ def cmd_pending(args) -> int:
     recorded = _store(args).done(args.repo, args.metric)
     for c in record.pending(record.first_parent(Path(args.checkout), args.ref), recorded, args.limit):
         print(c)
+    return 0
+
+
+def cmd_backlog(args) -> int:
+    checkout = Path(args.checkout)
+    recorded = _store(args).done(args.repo, args.metric)
+    print(json.dumps(record.backlog(record.first_parent(checkout, args.ref), recorded,
+                                    record.is_shallow(checkout))))
     return 0
 
 
@@ -216,6 +227,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ref", default="HEAD")
     p.add_argument("--limit", type=int, default=10)
     p.set_defaults(func=cmd_pending)
+
+    p = with_store(sub.add_parser("backlog", help="how many landed commits have no record yet"))
+    p.add_argument("--checkout", required=True)
+    p.add_argument("--metric", default=BUILD_SIZE)
+    p.add_argument("--ref", default="HEAD")
+    p.set_defaults(func=cmd_backlog)
 
     rec = sub.add_parser("record", help="measure and store one record")
     rsub = rec.add_subparsers(dest="metric", required=True)
