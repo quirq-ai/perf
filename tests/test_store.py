@@ -111,3 +111,20 @@ def test_record_size_is_capped(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "MAX_LINE", 400)
     with pytest.raises(store.StoreError, match="larger than"):
         store.FileStore(tmp_path).put(rec(error="e" * 500))
+
+
+@pytest.mark.parametrize("line", ['{"schema": ' + "1" * 5000 + "}", "[" * 100_000 + "]" * 100_000])
+def test_hostile_json_is_a_bad_line(tmp_path, line):
+    p = tmp_path / "innernet" / "build-size.jsonl"
+    p.parent.mkdir()
+    p.write_text(line + "\n")
+    with pytest.raises(store.StoreError, match="build-size.jsonl:1"):
+        store.FileStore(tmp_path).records("innernet", "build-size")
+
+
+def test_unknown_key_names_are_quoted(tmp_path):
+    r = rec()
+    r["z\n::warning::x"] = 1
+    with pytest.raises(store.StoreError) as e:
+        store.FileStore(tmp_path).put(r)
+    assert "\n" not in str(e.value)

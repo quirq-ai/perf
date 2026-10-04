@@ -31,7 +31,7 @@ MAX_VALUES = 64
 MAX_TEXT = 2_000      # characters of any one string a record holds (an error message is cut there)
 MAX_FIELDS = 32       # keys of runner, toolchains and run
 MAX_NUMBER = 1e18     # far above any size, count or duration
-MAX_LINE = 1 << 20    # bytes of one stored record; samples are the only large part
+MAX_LINE = 256 << 10  # bytes of one stored record; the largest legitimate one is about 240 KB
 KEYS = {"schema", "repo", "commit", "committed_at", "metric", "target", "status", "values", "runner",
         "toolchains", "run", "recorded_at", "error", "detail"}
 
@@ -96,7 +96,7 @@ def validate(record) -> dict:
     if not isinstance(record, dict):
         raise StoreError(f"a record is a JSON object, got {type(record).__name__}")
     if unknown := set(record) - KEYS:
-        raise StoreError(f"record has unknown keys: {', '.join(sorted(map(str, unknown)))[:200]}")
+        raise StoreError(f"record has unknown keys: {', '.join(sorted(map(repr, unknown)))[:200]}")
     for key in ("schema", "repo", "commit", "metric", "status", "values", "runner"):
         if key not in record:
             raise StoreError(f"record has no {key!r}")
@@ -155,7 +155,8 @@ class FileStore:
                 continue
             try:
                 out.append(validate(loads(line)))
-            except (json.JSONDecodeError, StoreError) as e:
+            # ValueError: JSON errors, and integers past Python's digit limit; RecursionError: deep nesting.
+            except (ValueError, RecursionError, StoreError) as e:
                 raise StoreError(f"{path}:{n} is not a valid record ({e}); fix or remove that line") from None
         return out
 
