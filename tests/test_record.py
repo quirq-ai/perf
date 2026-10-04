@@ -50,3 +50,12 @@ def test_backlog():
     assert (out["pending"], out["oldest_pending"], out["falling_out"]) == (2, "c1", True)
     # Done (measured, or failed MAX_ATTEMPTS times): nothing older was pending when it was taken.
     assert record.backlog(landed, {"c1"}, True)["falling_out"] is False
+
+
+def test_since_first():
+    landed = ["c4", "c3", "c2", "c1"]
+    assert record.since_first(landed, set()) == landed
+    assert record.since_first(landed, {"c3"}) == ["c4", "c3"]
+    assert record.since_first(landed, {"c4", "c2"}) == ["c4", "c3", "c2"]
+    assert record.since_first(landed, {"elsewhere"}) == landed
+    assert record.since_first([], {"c1"}) == []
