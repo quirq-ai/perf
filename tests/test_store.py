@@ -60,7 +60,10 @@ def test_failed_is_retried_up_to_the_limit(tmp_path):
     ("detail", {"samples": [float("nan")]}, "samples"), ("detail", {"logs": []}, "detail"),
     ("detail", {"paths": [1]}, "paths"), ("target", "x" * 3000, "target"),
     ("runner", {"label": "x" * 3000}, "runner"), ("toolchains", {"node": 24}, "toolchains"),
-    ("values", [{"name": f"v{i}", "value": 1, "unit": "b"} for i in range(65)], "values")])
+    ("values", [{"name": f"v{i}", "value": 1, "unit": "b"} for i in range(65)], "values"),
+    ("values", [{"name": "x", "value": 10 ** 400, "unit": "b"}], "values"),
+    ("values", [{"name": "x", "value": 1e19, "unit": "b"}], "values"),
+    ("extra", "x" * 5_000_000, "unknown keys"), ("Extra", None, "unknown keys")])
 def test_bad_records_are_refused(tmp_path, field, value, match):
     r = rec()
     r[field] = value
@@ -102,3 +105,9 @@ def test_append_after_a_missing_final_newline(tmp_path):
     p.write_text(p.read_text().rstrip("\n"))
     s.put(rec(C2))
     assert [r["commit"] for r in s.records("innernet", "build-size")] == [C1, C2]
+
+
+def test_record_size_is_capped(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "MAX_LINE", 400)
+    with pytest.raises(store.StoreError, match="larger than"):
+        store.FileStore(tmp_path).put(rec(error="e" * 500))

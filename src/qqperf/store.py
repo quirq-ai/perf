@@ -30,6 +30,10 @@ MAX_SAMPLES = 10_000
 MAX_VALUES = 64
 MAX_TEXT = 2_000      # characters of any one string a record holds (an error message is cut there)
 MAX_FIELDS = 32       # keys of runner, toolchains and run
+MAX_NUMBER = 1e18     # far above any size, count or duration
+MAX_LINE = 1 << 20    # bytes of one stored record; samples are the only large part
+KEYS = {"schema", "repo", "commit", "committed_at", "metric", "target", "status", "values", "runner",
+        "toolchains", "run", "recorded_at", "error", "detail"}
 
 
 class StoreError(Exception):
@@ -50,7 +54,12 @@ def check_commit(value) -> str:
 
 def _number(v) -> bool:
     """A measured number: finite and not negative (sizes, counts and durations all are)."""
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    try:
+        return math.isfinite(v) and 0 <= v <= MAX_NUMBER
+    except OverflowError:  # an int too large for a float
+        return False
 
 
 def _reject_constant(name: str):
@@ -86,6 +95,8 @@ def validate(record) -> dict:
     """Refuse anything that is not a well-formed record, before any of it is written."""
     if not isinstance(record, dict):
         raise StoreError(f"a record is a JSON object, got {type(record).__name__}")
+    if unknown := set(record) - KEYS:
+        raise StoreError(f"record has unknown keys: {', '.join(sorted(map(str, unknown)))[:200]}")
     for key in ("schema", "repo", "commit", "metric", "status", "values", "runner"):
         if key not in record:
             raise StoreError(f"record has no {key!r}")
@@ -120,6 +131,8 @@ def validate(record) -> dict:
             raise StoreError(f"record {key} must be a string of at most {MAX_TEXT} characters")
     if "detail" in record:
         _check_detail(record["detail"])
+    if len(dumps(record).encode()) > MAX_LINE:
+        raise StoreError(f"record is larger than {MAX_LINE} bytes")
     return record
 
 
