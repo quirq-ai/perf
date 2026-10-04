@@ -57,10 +57,10 @@ Trust: the `measure` jobs run product code and its dependencies, so they get rea
 their records are claims. They upload only a ledger. The `store` job, which runs no product code,
 accepts a ledger only for its own leg's repo and metric, only for commits still pending on that
 repo's `main`, only for records naming this run, and only finite values of at least 0, then pushes
-`perf-data`. perf-publish runs after perf completes, from the default branch, only for a first-attempt run
-of perf.yml whose commit is on `main`, reads only `perf-data`, and is the only workflow that
-uploads results bundles; test-pipelines collects perf
-bundles from it alone.
+`perf-data`. perf-publish runs after perf completes, from the default branch, only for a run of
+perf.yml whose commit is on `main` while no tag is named `main`, reads only `perf-data`, and is the
+only workflow that uploads results bundles; test-pipelines collects perf bundles from it alone.
+Whoever can push to `perf-data` can still publish numbers, until a ruleset protects it (S13).
 
 ```sh
 qqperf pending --store DIR --repo innernet --checkout PATH        # landed commits with no record
