@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run qqperf from this checkout's source, with nothing installed: the trusted jobs (perf.yml's
+# store and perf-publish.yml) use it so that no build backend or package index runs in them.
+# qqperf needs only the standard library; `bundle` also needs qqresults on PYTHONPATH.
+src=$(cd "$(dirname "$0")/../src" && pwd)
+PYTHONPATH="$src${PYTHONPATH:+:$PYTHONPATH}" exec python -m qqperf "$@"

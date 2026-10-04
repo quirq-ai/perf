@@ -178,7 +178,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      # No stored credentials: only the final push step gets the token, not pip, qqperf or the
+      # No stored credentials: only the final push step gets the token, not qqperf or the
       # product clones, which all run before it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -186,7 +186,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14.8"
-      - run: python -m pip install --quiet -e .
+      # Nothing is installed: qqperf runs from this checkout (tools/qqperf), so no build backend or
+      # package index runs in the job that holds write access.
+      - run: echo "$GITHUB_WORKSPACE/tools" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         continue-on-error: true  # none when no job had a commit to measure
         with:
@@ -261,8 +263,10 @@ jobs:
           auth=$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
           # Through the environment, so the header never appears in a process's arguments.
-          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader \
+          # No hooks: nothing an earlier step left in .git/hooks runs with the token.
+          GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=http.extraheader \
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
             git -C .qq/data push --quiet origin "HEAD:$DATA_BRANCH"
       - name: fail on refused ledgers
         if: steps.store.outputs.refused == '1'
