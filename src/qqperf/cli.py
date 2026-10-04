@@ -14,7 +14,8 @@
     qqperf bundle --store DIR --repo NAME --metric M --run-url URL --results-out DIR
 
 `pending` lists the commits of a branch (first parent, newest first) with no ok record that have
-not yet failed MAX_ATTEMPTS times. `backlog` prints, as JSON, how many of those there are among
+not yet failed MAX_ATTEMPTS times, down to the oldest commit the store has any record of (older
+commits landed before perf measured the stream). `backlog` prints, as JSON, how many of those there are among
 the commits the checkout holds and whether commits are falling out of a shallow checkout before
 they are measured. `record build-size` measures a finished Next.js build and stores
 one record; with `--error` it stores a failed record instead, so the history shows the gap.
@@ -46,18 +47,23 @@ def _store(args):
     return open_store(args.backend, Path(args.store))
 
 
+def _landed(args, store) -> list[str]:
+    """The commits perf owes a record: first parent of the ref, down to the oldest one recorded."""
+    seen = {r["commit"] for r in store.records(args.repo, args.metric)}
+    return record.since_first(record.first_parent(Path(args.checkout), args.ref), seen)
+
+
 def cmd_pending(args) -> int:
-    recorded = _store(args).done(args.repo, args.metric)
-    for c in record.pending(record.first_parent(Path(args.checkout), args.ref), recorded, args.limit):
+    store = _store(args)
+    for c in record.pending(_landed(args, store), store.done(args.repo, args.metric), args.limit):
         print(c)
     return 0
 
 
 def cmd_backlog(args) -> int:
-    checkout = Path(args.checkout)
-    recorded = _store(args).done(args.repo, args.metric)
-    print(json.dumps(record.backlog(record.first_parent(checkout, args.ref), recorded,
-                                    record.is_shallow(checkout))))
+    store = _store(args)
+    print(json.dumps(record.backlog(_landed(args, store), store.done(args.repo, args.metric),
+                                    record.is_shallow(Path(args.checkout)))))
     return 0
 
 

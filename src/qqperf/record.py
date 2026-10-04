@@ -90,6 +90,14 @@ def commit_time(checkout: Path, commit: str) -> str:
     return _git(checkout, "show", "-s", "--format=%cI", "--end-of-options", commit).strip()
 
 
+def since_first(landed: list[str], seen: set[str]) -> list[str]:
+    """The landed commits (newest first) down to the oldest one with any record: the history perf
+    is responsible for. Older commits landed before perf measured this stream and are left alone.
+    With no record yet, every landed commit (the newest is measured first)."""
+    oldest = max((i for i, c in enumerate(landed) if c in seen), default=len(landed) - 1)
+    return landed[: oldest + 1]
+
+
 def pending(landed: Iterable[str], recorded: set[str], limit: int) -> list[str]:
     """Landed commits with no record yet, newest first, at most `limit`."""
     return [c for c in landed if c not in recorded][: max(limit, 0)]
