@@ -12,6 +12,9 @@ dependencies = []
 
 [project.optional-dependencies]
 test = ["pytest==9.1.1"]
+# What the build-size workflow builds with: recipes' node-app adapter (V0-REC-03, quirq-ai/recipes#4),
+# by pinned commit. TODO(expert): let rollers move this pin.
+build = ["qqrecipes @ git+https://github.com/quirq-ai/recipes@c3b0cafa72da512e14eae90f5d0bac49692b835b"]
 
 [project.scripts]
 qqperf = "qqperf.cli:main"
