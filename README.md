@@ -59,7 +59,7 @@ qqperf manifest --base repo.toml --target app --params '{"bench": {...}}' --out 
 | Item | What | PR | State |
 |---|---|---|---|
 | V0-PRF-02 | Build-size record for Next.js apps | #2 | merged; innernet history on [`perf-data`](../../blob/perf-data/innernet/build-size.jsonl) since run [37202550498](../../actions/runs/37202550498) |
-| V0-PRF-01 | `bench` capability and storage | recipes#10, #4 | in review (test-pipelines#5 collects quirq-ai/perf) |
+| V0-PRF-01 | `bench` capability and storage | recipes#10, #4 | in review |
 
 ## Working here
 

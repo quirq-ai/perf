@@ -20,7 +20,7 @@ test = [
 ]
 # What the perf workflow builds and benchmarks with: recipes' adapters, including `bench`
 # (V0-PRF-01, quirq-ai/recipes#10), by pinned commit. TODO(expert): let rollers move this pin.
-build = ["qqrecipes @ git+https://github.com/quirq-ai/recipes@c9fb9435c1b420dc7d217a47159e1758de8998c0"]
+build = ["qqrecipes @ git+https://github.com/quirq-ai/recipes@ab25f8c5b172c1357337e8afdf97d67338d43f46"]
 
 [project.scripts]
 qqperf = "qqperf.cli:main"
