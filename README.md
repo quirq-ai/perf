@@ -60,7 +60,8 @@ repo's `main`, only for records naming this run, and only finite values of at le
 `perf-data`. perf-publish runs after perf completes, from the default branch, only for a run of
 perf.yml whose commit is on `main` while no tag is named `main`, reads only `perf-data`, and is the
 only workflow that uploads results bundles; test-pipelines collects perf bundles from it alone.
-Whoever can push to `perf-data` can still publish numbers, until a ruleset protects it (S13).
+The tag check holds only while perf-publish runs, so whoever can push to `perf-data` or create a
+`main` tag can still publish numbers, until rulesets protect both (S13).
 
 ```sh
 qqperf pending --store DIR --repo innernet --checkout PATH        # landed commits with no record
