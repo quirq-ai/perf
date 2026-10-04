@@ -159,7 +159,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      # No stored credentials: only the push below gets the token, not pip or anything it runs.
+      # No stored credentials: only the final push step gets the token, not pip, qqperf or the
+      # product clones, which all run before it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
@@ -173,9 +174,8 @@ jobs:
           pattern: ledger--*
           path: .qq/new
       - name: append to the history branch
+        id: store
         shell: bash  # -eo pipefail
-        env:
-          PUSH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$(find .qq/new -name '*.jsonl' 2>/dev/null)" ]; then
             echo "no records to store"; exit 0
@@ -226,12 +226,27 @@ jobs:
               echo "::error::ledger $name refused"; refused=1
             fi
           done
+          echo "refused=$refused" >> "$GITHUB_OUTPUT"
           if [ -z "$(git -C .qq/data status --porcelain)" ]; then
-            echo "nothing new to store"; exit "$refused"
+            echo "nothing new to store"; exit 0
           fi
           git -C .qq/data add -A
           git -C .qq/data commit --quiet -m "perf: records from run ${GITHUB_RUN_ID}"
+          echo "push=1" >> "$GITHUB_OUTPUT"
+      - name: push the history branch
+        if: steps.store.outputs.push == '1'
+        shell: bash
+        env:
+          PUSH_TOKEN: ${{ github.token }}
+        run: |
           auth=$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 -w0)
-          git -C .qq/data -c http.extraheader="AUTHORIZATION: basic $auth" \
-            push --quiet origin "HEAD:$DATA_BRANCH"
-          exit "$refused"
+          echo "::add-mask::$auth"
+          # Through the environment, so the header never appears in a process's arguments.
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git -C .qq/data push --quiet origin "HEAD:$DATA_BRANCH"
+      - name: fail on refused ledgers
+        if: steps.store.outputs.refused == '1'
+        run: |
+          echo "::error::at least one ledger was refused; see the step above"
+          exit 1
