@@ -103,3 +103,16 @@ jobs:
           test "$(qqperf history --store .qq/new --repo "$REPO" --metric "$METRIC" --json \
             | python -c 'import json, sys; print(json.load(sys.stdin)[0]["status"])')" = ok
           for b in .qq/results/qq-results-*; do qqresults show "$b"; cat "$b/results.jsonl"; done
+  # One stable name for the required checks: matrix legs report under per-leg names.
+  measure-result:
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every measure leg passed
+        env:
+          RESULT: ${{ needs.measure.result }}
+        run: |
+          echo "measure: $RESULT"
+          [ "$RESULT" = success ]
