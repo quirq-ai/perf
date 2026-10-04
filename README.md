@@ -14,7 +14,8 @@ records numbers; it does not alert or bisect.
   and `innernet-search`. Kind-specific `bench` code belongs in `quirq-ai/recipes` adapters, not here.
 - Every record is written as a `quirq-ai/test-pipelines` results bundle: a Run for the measured
   repo and commit with one Result (`perf::<metric>`) whose `metrics` hold the values as
-  `{value, unit}`. Its scorecard workflow collects them into the results store (V0-TST-02).
+  `{value, unit}`, and a `raw` JSON with the runner type, toolchains and any raw samples. Its
+  scorecard workflow collects them into the results store (V0-TST-02).
 
 Plan and every v0 item: [quirq-ai/infra-config](https://github.com/quirq-ai/infra-config),
 `docs/plan.md` and `docs/v0.md`.
@@ -58,7 +59,7 @@ qqperf manifest --base repo.toml --target app --params '{"bench": {...}}' --out 
 | Item | What | PR | State |
 |---|---|---|---|
 | V0-PRF-02 | Build-size record for Next.js apps | #2 | merged; innernet history on [`perf-data`](../../blob/perf-data/innernet/build-size.jsonl) since run [37202550498](../../actions/runs/37202550498) |
-| V0-PRF-01 | `bench` capability and storage | recipes#10, #4 | in review |
+| V0-PRF-01 | `bench` capability and storage | recipes#10, #4 | in review; bundles reach the results store once test-pipelines' scorecard collects quirq-ai/perf |
 
 ## Working here
 

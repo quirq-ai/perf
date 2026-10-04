@@ -1,3 +1,5 @@
+import json
+
 from qqresults import bundle
 
 from qqperf import record, results
@@ -34,6 +36,13 @@ def test_bundle_round_trips_with_metrics(tmp_path):
     assert r.metrics == {"latency_p50": {"value": 12.5, "unit": "ms"},
                          "latency_samples": {"value": 30, "unit": "count"}}
     assert b.verdict.passed
+    assert json.loads(r.raw) == {"runner": rec()["runner"], "toolchains": {}, "target": "app"}
+
+
+def test_raw_keeps_bench_samples(tmp_path):
+    detail = {"measure": "latency", "paths": ["/search?q=a"], "unit": "ms", "samples": [12.0, 13.5]}
+    [r] = bundle.read(results.write_bundle(rec(), tmp_path, backend="local", org="quirq-ai", detail=detail)).results
+    assert json.loads(r.raw)["samples"] == [12.0, 13.5] and json.loads(r.raw)["paths"] == ["/search?q=a"]
 
 
 def test_failed_record_is_an_unexpected_crash(tmp_path):

@@ -86,7 +86,8 @@ def test_record_bench_and_results_bundle(tmp_path, product_repo, capsys):
     bench_dir = tmp_path / "out" / "bench"
     bench_dir.mkdir(parents=True)
     (bench_dir / "server.bench.serve.json").write_text(json.dumps(
-        {"ok": True, "metrics": {"startup_p50": {"value": 1.25, "unit": "s"}}}))
+        {"ok": True, "metrics": {"startup_p50": {"value": 1.25, "unit": "s"}}, "measure": "startup",
+         "paths": ["/"], "unit": "s", "samples": [1.2, 1.25, 1.3]}))
     base = ["record", "bench", "--store", str(tmp_path / "store"), "--repo", "xo-space", "--checkout",
             str(product_repo), "--benchmark", "xo-space-server-start", "--target", "server", "--runner", "x",
             "--results-out", str(tmp_path / "results"), "--results-backend", "local",
@@ -97,6 +98,8 @@ def test_record_bench_and_results_bundle(tmp_path, product_repo, capsys):
     [path] = (tmp_path / "results").iterdir()
     b = bundle.read(path)
     assert b.run.repo == "quirq-ai/xo-space" and b.results[0].metrics["startup_p50"]["unit"] == "s"
+    raw = json.loads(b.results[0].raw)
+    assert raw["samples"] == [1.2, 1.25, 1.3] and raw["runner"]["label"] == "x" and raw["target"] == "server"
     assert f"name={path.name}" in (tmp_path / "gh-out").read_text()
 
     # A failed benchmark is a failed record, retried later.
@@ -105,6 +108,20 @@ def test_record_bench_and_results_bundle(tmp_path, product_repo, capsys):
     assert cli.main([*base, "--bench-dir", str(bench_dir), "--commit", landed[1]]) == 0
     rows = cli.open_store("files", tmp_path / "store").records("xo-space", "xo-space-server-start")
     assert [r["status"] for r in rows] == ["ok", "failed"] and "never ready" in rows[1]["error"]
+
+
+def test_no_ledger_record_without_its_bundle(tmp_path, product_repo, capsys, monkeypatch):
+    from qqresults.errors import Error
+    from qqperf import results
+
+    def broken(*a, **kw):
+        raise Error("GITHUB_RUN_ID is not set")
+    monkeypatch.setattr(results, "write_bundle", broken)
+    assert cli.main(["record", "bench", "--store", str(tmp_path / "store"), "--repo", "xo-space", "--checkout",
+                     str(product_repo), "--benchmark", "b", "--target", "server", "--runner", "x",
+                     "--error", "boom", "--results-out", str(tmp_path / "results")]) == 1
+    assert "nothing was recorded" in capsys.readouterr().err
+    assert cli.open_store("files", tmp_path / "store").records("xo-space", "b") == []
 
 
 def test_record_bench_needs_a_target(tmp_path, product_repo):
@@ -116,13 +133,13 @@ def test_record_bench_needs_a_target(tmp_path, product_repo):
 def test_manifest_adds_params(tmp_path, capsys):
     base = tmp_path / "repo.toml"
     base.write_text('schema = "quirq-repo/1"\n[qq]\nversion = "0.1.0"\n\n[[targets]]\nname = "app"\n'
-                    'kind = "node-app"\nsrcs = ["app/**"]\nparams = { ready_path = "/" }\n')
+                    'kind = "node-app"\nsrcs = ["app/**"]\nparams = { ready_path = "/", env = { A = "1" } }\n')
     out = tmp_path / "bench.toml"
     params = json.dumps({"env": {"INNERNET_DEMO": "1"}, "bench": {"paths": ["/search?q=qq"], "samples": 10}})
     assert cli.main(["manifest", "--base", str(base), "--target", "app", "--params", params, "--out", str(out)]) == 0
     from qqsync.manifest import load
     [t] = load(out)["targets"]
-    assert t["params"] == {"ready_path": "/", "env": {"INNERNET_DEMO": "1"},
+    assert t["params"] == {"ready_path": "/", "env": {"A": "1", "INNERNET_DEMO": "1"},
                            "bench": {"paths": ["/search?q=qq"], "samples": 10}}
     assert cli.main(["manifest", "--base", str(base), "--target", "nope", "--params", "{}", "--out", str(out)]) == 1
     assert cli.main(["manifest", "--base", str(base), "--target", "app", "--params", "[1]", "--out", str(out)]) == 1

@@ -5,7 +5,7 @@
 #   innernet-search        V0-PRF-01  latency of search requests on innernet's demo build
 #
 # Each measurement polls its repo's main and takes the newest commit that has no record yet, so a
-# backlog drains one commit per run. Builds and benchmarks go through recipes' adapters (`build`,
+# backlog drains one commit per run (about 48 a day; a new metric backfills up to 49 old commits). Builds and benchmarks go through recipes' adapters (`build`,
 # `bench`). Every record is kept twice: as a test-pipelines results bundle (a `qq-results-*`
 # artifact, a Result whose metrics hold the values; the scorecard workflow collects it into the
 # results store), and on this repo's `perf-data` branch, which is also how a run knows what is
@@ -138,12 +138,23 @@ jobs:
           path: ${{ steps.measure.outputs.bundle }}
           if-no-files-found: error
       - uses: actions/upload-artifact@v7
+        if: failure() && steps.pending.outputs.commit != ''
+        with:
+          # The service and step logs of a failed build or benchmark, which the record only points at.
+          name: logs--${{ matrix.repo }}--${{ matrix.metric }}
+          path: |
+            ${{ runner.temp }}/qq-out/*/logs/
+            ${{ runner.temp }}/qq-bench/out-*/logs/
+          if-no-files-found: ignore
+          overwrite: true
+      - uses: actions/upload-artifact@v7
         if: always() && steps.pending.outputs.commit != ''
         with:
           # ledger--<repo>--<metric>: the store job merges each only for its own repo.
           name: ledger--${{ matrix.repo }}--${{ matrix.metric }}
           path: .qq/new/
           if-no-files-found: ignore
+          overwrite: true  # a re-run of this job replaces the attempt before it
   store:
     needs: measure
     if: always()

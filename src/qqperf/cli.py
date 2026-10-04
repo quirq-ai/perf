@@ -56,8 +56,10 @@ def _toolchains(values: list[str]) -> dict[str, str]:
     return out
 
 
-def _record(args, metric: str, values, error) -> int:
-    """Store one record, and write it as a results bundle when --results-out is given."""
+def _record(args, metric: str, values, error, detail: dict | None = None) -> int:
+    """Store one record, and write it as a results bundle when --results-out is given. The bundle
+    comes first: a record in the ledger is never measured again, so it must not exist without one.
+    `detail` (raw samples and such) goes into the bundle's Result only."""
     checkout = Path(args.checkout)
     commit = check_commit(args.commit or record.first_parent(checkout, "HEAD")[0])
     rec = record.make(
@@ -65,6 +67,15 @@ def _record(args, metric: str, values, error) -> int:
         error=error, runner_info=record.runner(args.runner, args.runner_backend),
         toolchains=_toolchains(args.toolchain), committed_at=record.commit_time(checkout, commit),
         run={"url": args.run_url} if args.run_url else {})
+    out = None
+    if args.results_out:
+        from qqresults.errors import Error as ResultsError  # only the results path needs qqresults
+        from qqperf import results
+        try:
+            out = results.write_bundle(rec, Path(args.results_out), backend=args.results_backend,
+                                       org=args.org, detail=detail)
+        except ResultsError as e:
+            raise record.RecordError(f"results bundle not written, so nothing was recorded: {e}") from None
     path = _store(args).put(rec)
     if error is None:
         shown = ", ".join(f"{v['name']}={v['value']}{'' if v['unit'] in ('bytes', 'count') else v['unit']}"
@@ -72,9 +83,7 @@ def _record(args, metric: str, values, error) -> int:
         print(f"recorded {args.repo} {commit[:12]} {metric}: {shown} -> {path}")
     else:
         print(f"recorded {args.repo} {commit[:12]} {metric}: failed -> {path}")
-    if args.results_out:
-        from qqperf import results  # needs qqresults; only the results path imports it
-        out = results.write_bundle(rec, Path(args.results_out), backend=args.results_backend, org=args.org)
+    if out is not None:
         print(f"results bundle: {out}")
         if args.github_output:
             with open(args.github_output, "a", encoding="utf-8") as f:
@@ -88,13 +97,22 @@ def cmd_record_build_size(args) -> int:
 
 
 def cmd_record_bench(args) -> int:
-    values, error = None, args.error
+    values, error, detail = None, args.error, None
     if error is None:
         try:
-            values, _ = bench.read(Path(args.bench_dir), args.target)
+            values, data = bench.read(Path(args.bench_dir), args.target)
+            detail = {k: data.get(k) for k in ("measure", "paths", "unit", "samples")}
         except bench.BenchError as e:
             error = str(e)  # a failed benchmark is recorded as failed, like a failed build
-    return _record(args, args.benchmark, values, error)
+    return _record(args, args.benchmark, values, error, detail)
+
+
+def merge_params(base: dict, extra: dict) -> dict:
+    """extra over base, one level deep: an overlay `env` adds to the target's own env."""
+    out = dict(base)
+    for k, v in extra.items():
+        out[k] = {**base[k], **v} if isinstance(v, dict) and isinstance(base.get(k), dict) else v
+    return out
 
 
 def cmd_manifest(args) -> int:
@@ -112,7 +130,7 @@ def cmd_manifest(args) -> int:
         target = next((t for t in m.data.get("targets", []) if t.get("name") == args.target), None)
         if target is None:
             raise record.RecordError(f"{args.base} has no target {args.target!r}")
-        m.set_target(args.target, "params", {**target.get("params", {}), **extra})
+        m.set_target(args.target, "params", merge_params(target.get("params", {}), extra))
         m.write(args.out)
     except ManifestError as e:
         raise record.RecordError(str(e)) from None

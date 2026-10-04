@@ -12,6 +12,7 @@ exists, so these become `postsubmit` runs.
 """
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -35,7 +36,15 @@ def make_run(*, backend: str, repo: str, commit: str, name: str, branch: str = "
     return b.run_from_args(repo, commit, kind="local", name=name)
 
 
-def to_result(run: Run, record: Mapping) -> Result:
+def raw(record: Mapping, detail: Mapping | None = None) -> str:
+    """What the metrics alone lose, as canonical JSON: the runner type, toolchains, target and
+    any detail the measurement kept (a bench's raw samples, unit and paths)."""
+    data = {"runner": record["runner"], "toolchains": record["toolchains"], "target": record["target"],
+            **(detail or {})}
+    return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def to_result(run: Run, record: Mapping, detail: Mapping | None = None) -> Result:
     """One Result from one perf record: PASS with metrics, or CRASH with the error."""
     ok = record["status"] == "ok"
     return Result(
@@ -45,12 +54,14 @@ def to_result(run: Run, record: Mapping) -> Result:
         expected=ok,
         message=record.get("error", ""),
         metrics={v["name"]: {"value": v["value"], "unit": v["unit"]} for v in record["values"]},
+        raw=raw(record, detail),
     )
 
 
-def write_bundle(record: Mapping, out: Path, *, backend: str, org: str) -> Path:
+def write_bundle(record: Mapping, out: Path, *, backend: str, org: str,
+                 detail: Mapping | None = None) -> Path:
     repo = f"{org}/{record['repo']}"
     run = make_run(backend=backend, repo=repo, commit=record["commit"],
                    name=f"{record['metric']}-{record['commit'][:12]}")
-    results = [to_result(run, record)]
+    results = [to_result(run, record, detail)]
     return bundle.write(bundle.Bundle(run, results, verdict.compute(run, results)), Path(out))
