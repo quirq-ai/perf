@@ -85,3 +85,12 @@ def test_bad_line_is_reported(tmp_path, line):
     p.write_text(line + "\n")
     with pytest.raises(store.StoreError, match="build-size.jsonl:1"):
         store.FileStore(tmp_path).done("innernet", "build-size")
+
+
+def test_append_after_a_missing_final_newline(tmp_path):
+    s = store.FileStore(tmp_path)
+    s.put(rec(C1, error="flaky"))
+    p = tmp_path / "innernet" / "build-size.jsonl"
+    p.write_text(p.read_text().rstrip("\n"))
+    s.put(rec(C2))
+    assert [r["commit"] for r in s.records("innernet", "build-size")] == [C1, C2]

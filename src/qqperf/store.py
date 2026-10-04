@@ -17,7 +17,9 @@ import re
 from pathlib import Path
 
 SCHEMA = "qq-perf-record/1"
-MAX_ATTEMPTS = 3  # failed records per commit before it stops being retried
+# Failed records per commit before it stops being retried. Hourly runs spend them in about three
+# hours, so a longer outage gives up on its commits. TODO(expert): space retries out over time.
+MAX_ATTEMPTS = 3
 STATUSES = ("ok", "failed")
 _NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -127,7 +129,11 @@ class FileStore:
         for (repo, metric), new in pending.items():
             path = self._path(repo, metric)
             path.parent.mkdir(parents=True, exist_ok=True)
+            # A hand-edited file may lack its last newline; never join two records on one line.
+            lead = path.is_file() and path.stat().st_size > 0 and not path.read_bytes().endswith(b"\n")
             with path.open("a", encoding="utf-8") as f:
+                if lead:
+                    f.write("\n")
                 for r in new:
                     f.write(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n")
         return len(records)

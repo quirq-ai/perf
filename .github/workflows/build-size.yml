@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
-      recorded: ${{ steps.build.outputs.recorded }}
+      commits: ${{ steps.pending.outputs.commits }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,6 +39,7 @@ jobs:
           python-version: "3.14.8"
       - run: python -m pip install --quiet -e ".[build]"
       - name: history so far
+        shell: bash  # -eo pipefail, so a failed git archive cannot pass as an empty history
         run: |
           mkdir -p .qq/data
           # Exit code 2 means no such branch yet; any other failure stops the run.
@@ -70,28 +71,32 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: "11.28.2"
-      - name: build and measure commits with no record
-        id: build
+      - name: commits with no record
+        id: pending
         env:
           LIMIT: ${{ inputs.limit || '5' }}
         run: |
           commits=$(qqperf pending --store .qq/data --repo innernet --checkout .qq/innernet --limit "$LIMIT")
           echo "pending: ${commits:-none}"
-          if [ -n "$commits" ]; then
-            # Set first, so records made before a timeout or crash are still stored.
-            echo "recorded=true" >> "$GITHUB_OUTPUT"
-            tools/build_commits.sh .qq/innernet .qq/sync/tests/fixtures/innernet.repo.toml .qq/new \
-              innernet "$RUNNER_LABEL" $commits
-          fi
+          echo "commits=$(echo $commits)" >> "$GITHUB_OUTPUT"
+      - name: build and measure them
+        if: steps.pending.outputs.commits != ''
+        # Below the job's timeout, so the upload below still runs and keeps the records made so far.
+        timeout-minutes: 50
+        env:
+          COMMITS: ${{ steps.pending.outputs.commits }}
+        run: |
+          tools/build_commits.sh .qq/innernet .qq/sync/tests/fixtures/innernet.repo.toml .qq/new \
+            innernet "$RUNNER_LABEL" $COMMITS
       - uses: actions/upload-artifact@v7
-        if: always() && steps.build.outputs.recorded == 'true'
+        if: always() && steps.pending.outputs.commits != ''
         with:
           name: new-records
           path: .qq/new/
           if-no-files-found: ignore
   store:
     needs: measure
-    if: always() && needs.measure.outputs.recorded == 'true'
+    if: always() && needs.measure.outputs.commits != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -128,6 +133,7 @@ jobs:
               "Lines file per repo and metric. Write-once: never edit a line." > .qq/data/README.md
           fi
           # Only innernet's records: the artifact comes from a job that ran innernet's build.
+          # TODO(expert): also accept only the commits this run listed (needs.measure.outputs.commits).
           qqperf merge --store .qq/data --from .qq/new --repo innernet
           git -C .qq/data add -A
           git -C .qq/data commit --quiet -m "build-size: $(find .qq/new -name '*.jsonl' -exec cat {} + | wc -l) record(s) from run ${GITHUB_RUN_ID}"
