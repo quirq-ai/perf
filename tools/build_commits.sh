@@ -7,8 +7,6 @@
 # has one (V0-ONB-02). A build or measurement that fails is recorded as failed, so the history
 # shows the gap and the next run retries it (up to qqperf's MAX_ATTEMPTS); one bad commit never
 # loses the records of the others.
-# With QQ_RESULTS_OUT set, each record is also written there as a test-pipelines results bundle,
-# and its path and name are appended to QQ_GITHUB_OUTPUT when that is set (V0-PRF-01).
 # TODO(expert): read the build output dir from the manifest target instead of assuming .next.
 set -euo pipefail
 checkout=$1 fixture=$2 store=$3 repo=$4 label=$5
@@ -18,12 +16,7 @@ node_version=$(node --version | sed 's/^v//')
 pnpm_version=$(pnpm --version)
 run=()
 if [ -n "${GITHUB_RUN_ID:-}" ]; then
-  run=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
-fi
-if [ -n "${QQ_RESULTS_OUT:-}" ]; then
-  run+=(--results-out "$QQ_RESULTS_OUT")
-  [ -z "${QQ_GITHUB_OUTPUT:-}" ] || run+=(--github-output "$QQ_GITHUB_OUTPUT")
-  [ -n "${GITHUB_RUN_ID:-}" ] || run+=(--results-backend local)
+  run=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")
 fi
 for commit in "$@"; do
   echo "::group::${repo} ${commit}"

@@ -23,7 +23,7 @@ jobs:
   # End to end, with the same scripts the perf workflow runs, at pinned product commits, into
   # scratch stores: V0-PRF-02's build size of innernet, and V0-PRF-01's benchmark of each product
   # repo. Each record is also written as a results bundle and read back with qqresults; presubmit
-  # keeps no bundle artifact, so these numbers never reach the results store.
+  # keeps no bundle artifact (only perf-publish.yml does), so these numbers never reach the store.
   measure:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -85,7 +85,6 @@ jobs:
           PARAMS: ${{ matrix.params }}
           COMMIT: ${{ matrix.commit }}
           PYTHON_ROOT: ${{ steps.python.outputs.python-path }}
-          QQ_RESULTS_OUT: .qq/results
         run: |
           fixture=.qq/sync/tests/fixtures/$REPO.repo.toml
           if [ "$METRIC" = build-size ]; then
@@ -102,6 +101,8 @@ jobs:
           # A failure is recorded too; here the measurement must have succeeded.
           test "$(qqperf history --store .qq/new --repo "$REPO" --metric "$METRIC" --json \
             | python -c 'import json, sys; print(json.load(sys.stdin)[0]["status"])')" = ok
+          qqperf bundle --store .qq/new --repo "$REPO" --metric "$METRIC" --results-backend local \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" --results-out .qq/results
           for b in .qq/results/qq-results-*; do qqresults show "$b"; cat "$b/results.jsonl"; done
   # One stable name for the required checks: matrix legs report under per-leg names.
   measure-result:

@@ -2,9 +2,10 @@
 
 One perf record (one metric of one commit) becomes one run bundle, written with test-pipelines'
 own `qqresults` (pinned by commit): a Run for the measured repo and commit, one Result whose
-`metrics` hold every value as `{value, unit}`, and the Verdict computed from it. The workflow
-keeps the bundle as a `qq-results-*` artifact, and test-pipelines' scorecard workflow collects it
-into the results store.
+`metrics` hold every value as `{value, unit}`, and the Verdict computed from it. Bundles are built
+only from records already merged into perf-data, by the perf-publish workflow, which runs no
+product code; it keeps each as a `qq-results-*` artifact, and test-pipelines' scorecard workflow
+collects it into the results store.
 
 The Run's kind is `other`: product repos have no post-submit of their own yet (V0-GAR-01), so perf
 polls their main branches. TODO(expert): run `bench` inside the generated post-submit once it
@@ -36,15 +37,16 @@ def make_run(*, backend: str, repo: str, commit: str, name: str, branch: str = "
     return b.run_from_args(repo, commit, kind="local", name=name)
 
 
-def raw(record: Mapping, detail: Mapping | None = None) -> str:
+def raw(record: Mapping) -> str:
     """What the metrics alone lose, as canonical JSON: the runner type, toolchains, target and
     any detail the measurement kept (a bench's raw samples, unit and paths)."""
-    data = {"runner": record["runner"], "toolchains": record["toolchains"], "target": record["target"],
-            **(detail or {})}
+    data = {"runner": record["runner"], "toolchains": record.get("toolchains", {}),
+            "target": record.get("target", ""), "measured_in": record.get("run", {}).get("url", ""),
+            **record.get("detail", {})}
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
 
 
-def to_result(run: Run, record: Mapping, detail: Mapping | None = None) -> Result:
+def to_result(run: Run, record: Mapping) -> Result:
     """One Result from one perf record: PASS with metrics, or CRASH with the error."""
     ok = record["status"] == "ok"
     return Result(
@@ -54,14 +56,13 @@ def to_result(run: Run, record: Mapping, detail: Mapping | None = None) -> Resul
         expected=ok,
         message=record.get("error", ""),
         metrics={v["name"]: {"value": v["value"], "unit": v["unit"]} for v in record["values"]},
-        raw=raw(record, detail),
+        raw=raw(record),
     )
 
 
-def write_bundle(record: Mapping, out: Path, *, backend: str, org: str,
-                 detail: Mapping | None = None) -> Path:
+def write_bundle(record: Mapping, out: Path, *, backend: str, org: str) -> Path:
     repo = f"{org}/{record['repo']}"
     run = make_run(backend=backend, repo=repo, commit=record["commit"],
                    name=f"{record['metric']}-{record['commit'][:12]}")
-    results = [to_result(run, record, detail)]
+    results = [to_result(run, record)]
     return bundle.write(bundle.Bundle(run, results, verdict.compute(run, results)), Path(out))

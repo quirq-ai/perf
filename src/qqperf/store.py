@@ -8,21 +8,28 @@ permanent gap and a broken one is not rebuilt forever.
 
 On GitHub the directory is the `perf-data` branch of this repo, which the perf workflow checks
 out, appends to and pushes. It is the ledger of what is measured; the system of record for the
-numbers is test-pipelines' results store, which gets every record as a results bundle (results.py).
+numbers is test-pipelines' results store, which gets each record as a results bundle built from
+this ledger by the perf-publish workflow (results.py).
 """
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 
 SCHEMA = "qq-perf-record/1"
-# Failed records per commit before it stops being retried. Hourly runs spend them in about three
-# hours, so a longer outage gives up on its commits. TODO(expert): space retries out over time.
+# Failed records per commit before it stops being retried. Runs every 30 minutes spend them in
+# about an hour and a half, so a longer outage gives up on its commits. TODO(expert): space retries out over time.
 MAX_ATTEMPTS = 3
 STATUSES = ("ok", "failed")
 _NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
+DETAIL_KEYS = {"measure": str, "unit": str, "paths": list, "samples": list}
+MAX_SAMPLES = 10_000
+MAX_VALUES = 64
+MAX_TEXT = 2_000      # characters of any one string a record holds (an error message is cut there)
+MAX_FIELDS = 32       # keys of runner, toolchains and run
 
 
 class StoreError(Exception):
@@ -39,6 +46,40 @@ def check_commit(value) -> str:
     if not isinstance(value, str) or not _COMMIT.fullmatch(value):
         raise StoreError(f"commit {value!r} must be a full 40-character lower-case hex sha")
     return value
+
+
+def _number(v) -> bool:
+    """A measured number: finite and not negative (sizes, counts and durations all are)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+
+
+def _reject_constant(name: str):
+    raise StoreError(f"{name} is not a number a record may hold")
+
+
+def loads(line: str):
+    """Strict JSON: NaN and Infinity are refused, as strict readers of perf-data would."""
+    return json.loads(line, parse_constant=_reject_constant)
+
+
+def dumps(record: dict) -> str:
+    return json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _check_detail(detail) -> None:
+    if not isinstance(detail, dict) or set(detail) - set(DETAIL_KEYS):
+        raise StoreError(f"record detail must be an object with only {', '.join(sorted(DETAIL_KEYS))}")
+    for key, kind in DETAIL_KEYS.items():
+        if key in detail and not isinstance(detail[key], kind):
+            raise StoreError(f"record detail.{key} must be a {kind.__name__}")
+    paths = detail.get("paths", [])
+    if len(paths) > 100 or not all(isinstance(p, str) and len(p) <= 512 for p in paths):
+        raise StoreError("record detail.paths must be at most 100 short strings")
+    if any(len(detail.get(k, "")) > 32 for k in ("measure", "unit")):
+        raise StoreError("record detail.measure and unit must be short strings")
+    samples = detail.get("samples", [])
+    if len(samples) > MAX_SAMPLES or not all(_number(v) for v in samples):
+        raise StoreError(f"record detail.samples must be at most {MAX_SAMPLES} finite numbers >= 0")
 
 
 def validate(record) -> dict:
@@ -58,13 +99,27 @@ def validate(record) -> dict:
     values = record["values"]
     if not isinstance(values, list) or not all(
             isinstance(v, dict) and set(v) == {"name", "value", "unit"} and isinstance(v["name"], str)
-            and isinstance(v["unit"], str) and isinstance(v["value"], (int, float))
-            and not isinstance(v["value"], bool) for v in values):
-        raise StoreError("record values must be a list of {name, value, unit} with numeric values")
+            and isinstance(v["unit"], str) and _number(v["value"]) for v in values):
+        raise StoreError("record values must be a list of {name, value, unit} with finite values >= 0")
     if (record["status"] == "ok") != bool(values):
         raise StoreError("an ok record has values and a failed record has none")
     if not isinstance(record["runner"], dict):
         raise StoreError("record runner must be an object")
+    if not isinstance(record.get("run", {}), dict):
+        raise StoreError("record run must be an object")
+    if len(values) > MAX_VALUES or any(len(v["name"]) > 128 or len(v["unit"]) > 32 for v in values):
+        raise StoreError(f"record holds more than {MAX_VALUES} values or an over-long name or unit")
+    for key in ("runner", "toolchains", "run"):
+        obj = record.get(key, {})
+        if not isinstance(obj, dict) or len(obj) > MAX_FIELDS or not all(
+                isinstance(k, str) and isinstance(v, str) and len(k) <= 128 and len(v) <= MAX_TEXT
+                for k, v in obj.items()):
+            raise StoreError(f"record {key} must be an object of at most {MAX_FIELDS} short strings")
+    for key in ("target", "error", "committed_at", "recorded_at"):
+        if record.get(key) is not None and (not isinstance(record[key], str) or len(record[key]) > MAX_TEXT):
+            raise StoreError(f"record {key} must be a string of at most {MAX_TEXT} characters")
+    if "detail" in record:
+        _check_detail(record["detail"])
     return record
 
 
@@ -86,7 +141,7 @@ class FileStore:
             if not line.strip():
                 continue
             try:
-                out.append(validate(json.loads(line)))
+                out.append(validate(loads(line)))
             except (json.JSONDecodeError, StoreError) as e:
                 raise StoreError(f"{path}:{n} is not a valid record ({e}); fix or remove that line") from None
         return out
@@ -135,7 +190,7 @@ class FileStore:
                 if lead:
                     f.write("\n")
                 for r in new:
-                    f.write(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n")
+                    f.write(dumps(r) + "\n")
         return len(records)
 
     def put(self, record: dict) -> Path:

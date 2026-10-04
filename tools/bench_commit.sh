@@ -9,8 +9,6 @@
 # A run that fails is recorded as failed, so the history shows the gap and a later run retries it.
 #   QQ_RECIPES_ARGS   extra arguments for `qqrecipes execute`, such as --toolchain python=ROOT
 #   QQ_TOOLCHAINS     the toolchain versions to record, such as "python=3.14.8"
-#   QQ_RESULTS_OUT    also write each record as a test-pipelines results bundle there
-#   QQ_GITHUB_OUTPUT  append the bundle's path and name there
 # TODO(expert): move the benchmark params into infra-config perf.toml or the product manifests.
 set -euo pipefail
 checkout=$1 fixture=$2 target=$3 params=$4 store=$5 repo=$6 benchmark=$7 label=$8
@@ -21,12 +19,7 @@ read -r -a recipes_args <<< "${QQ_RECIPES_ARGS:-}"
 extra=()
 for tc in ${QQ_TOOLCHAINS:-}; do extra+=(--toolchain "$tc"); done
 if [ -n "${GITHUB_RUN_ID:-}" ]; then
-  extra+=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
-fi
-if [ -n "${QQ_RESULTS_OUT:-}" ]; then
-  extra+=(--results-out "$QQ_RESULTS_OUT")
-  [ -z "${QQ_GITHUB_OUTPUT:-}" ] || extra+=(--github-output "$QQ_GITHUB_OUTPUT")
-  [ -n "${GITHUB_RUN_ID:-}" ] || extra+=(--results-backend local)
+  extra+=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT")
 fi
 for commit in "$@"; do
   echo "::group::${repo} ${benchmark} ${commit}"
