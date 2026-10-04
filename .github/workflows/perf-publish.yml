@@ -20,11 +20,16 @@ env:
   DATA_BRANCH: perf-data
 jobs:
   publish:
-    # Only a perf run on this repo's main, from its schedule or a dispatch: workflow_run also fires
-    # for runs on other branches or from other repos' pull requests, if perf.yml ever gets one.
+    # Only a run of perf.yml on this repo's main, from its schedule or a dispatch: workflow_run also
+    # fires for runs on other branches or from other repos' pull requests, if perf.yml ever gets one.
+    # head_branch is a ref's short name, so a tag named main passes it: the first step refuses to
+    # publish while such a tag exists and checks that the commit is on the main branch. What
+    # perf-data holds is trusted as written: anyone who can push to it, or a run of an old perf.yml
+    # through a main tag, can publish, so perf-data and main tags need rulesets (admin, S13).
     if: >-
       github.event.workflow_run.head_branch == 'main'
       && github.event.workflow_run.head_repository.full_name == github.repository
+      && github.event.workflow_run.path == '.github/workflows/perf.yml'
       && contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event.workflow_run.event)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -40,7 +45,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      # Nothing is fetched or installed: qqperf runs from this checkout and qqresults from its pinned
+      # Before anything else runs: no main tag, and the perf run's commit is on the main branch.
+      - name: the perf run's commit is on main
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          rc=0; git ls-remote --exit-code origin refs/tags/main >/dev/null || rc=$?
+          if [ "$rc" != 2 ]; then
+            echo "::error::a tag named main exists, or ls-remote failed (exit $rc); not publishing"; exit 1
+          fi
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            git fetch --quiet --unshallow origin refs/heads/main
+          else
+            git fetch --quiet origin refs/heads/main
+          fi
+          git merge-base --is-ancestor "$HEAD_SHA" FETCH_HEAD ||
+            { echo "::error::$HEAD_SHA is not on main; not publishing"; exit 1; }
+      # Nothing is installed: qqperf runs from this checkout and qqresults from its pinned
       # source, on the runner's own python3, so no build backend, package index or Python download
       # runs in the job whose artifacts test-pipelines trusts.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
