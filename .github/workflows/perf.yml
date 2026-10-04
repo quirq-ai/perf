@@ -5,7 +5,8 @@
 #   innernet-search        V0-PRF-01  latency of search requests on innernet's demo build
 #
 # Each measurement polls its repo's main and takes the newest commit that has no record yet, so a
-# backlog drains one commit per run (about 48 a day; a new metric backfills up to 49 old commits).
+# backlog drains one commit per run (about 48 a day). A new metric starts at main's newest commit and
+# backfills nothing; every commit after its oldest record is owed one.
 # Builds and benchmarks go through recipes' adapters (`build`, `bench`).
 #
 # Trust: `measure` runs product code and its dependencies, so it holds read access only and its
@@ -124,10 +125,14 @@ jobs:
           echo "$REPO $METRIC backlog: \`$backlog\`" >> "$GITHUB_STEP_SUMMARY"
           falling_out=$(jq -r .falling_out <<<"$backlog")
           pending=$(jq -r .pending <<<"$backlog")
-          landed=$(jq -r .landed <<<"$backlog")
-          # With one pending, this run measures it: nothing falls out.
+          oldest=$(jq -r .oldest_pending <<<"$backlog")
+          # More than a day of runs behind: the oldest owed commits wait while newer ones go first.
+          if [ "$pending" -gt 48 ]; then
+            echo "::warning::$REPO $METRIC: $pending commits on main are still to be measured (oldest $oldest); perf is more than a day behind"
+          fi
+          # Only for a shallow checkout (this job's is full): owed commits beyond it are not seen.
           if [ "$falling_out" = true ] && [ "$pending" -gt 1 ]; then
-            echo "::warning::$REPO $METRIC: $pending of the last $landed commits on main are still to be measured; older commits are no longer measured"
+            echo "::warning::$REPO $METRIC: the checkout is shallow and owed commits older than it are not measured"
           fi
       - name: measure it
         id: measure
@@ -233,7 +238,7 @@ jobs:
               innernet/build-size|innernet/innernet-search|xo-space/xo-space-server-start) ;;
               *) echo "::error::unexpected ledger $name"; refused=1; continue ;;
             esac
-            if [ ! -d ".qq/repos/$repo" ] && ! git clone --quiet --filter=blob:none --no-checkout \
+            if [ ! -d ".qq/repos/$repo" ] && ! git clone --quiet --filter=tree:0 --single-branch --no-checkout \
                 "https://github.com/quirq-ai/$repo" ".qq/repos/$repo"; then
               echo "::error::cannot clone $repo; ledger $name not stored"; refused=1; continue
             fi

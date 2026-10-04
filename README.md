@@ -29,9 +29,11 @@ Plan and every v0 item: [quirq-ai/infra-config](https://github.com/quirq-ai/infr
 the newest commit on the product repo's `main` (first parent) that has no record yet, so a backlog
 drains one commit per run (48 runs a day at best; fewer when runs are slow, delayed or retrying
 failures). Every commit on `main` since the oldest one recorded is owed a record and stays pending
-until it has one, however far back it falls, so a burst only delays commits; it never skips them.
-Commits that landed before perf first measured a stream are not owed one. Each run writes the
-backlog (`qqperf backlog`) to its summary:
+until it has one, however far back it falls: no commit drops out of a window. The delay has no
+bound while main lands faster than runs measure (newest first, so the oldest wait longest), a
+commit that fails three times is given up, and commits that landed before perf first measured a
+stream are not owed one. Each run writes the backlog (`qqperf backlog`) to its summary and warns
+when more than a day of runs is pending:
 
 | Metric | Item | Repo | What |
 |---|---|---|---|
@@ -61,7 +63,7 @@ bundles from it alone.
 
 ```sh
 qqperf pending --store DIR --repo innernet --checkout PATH        # landed commits with no record
-qqperf backlog --store DIR --repo innernet --checkout PATH        # how many, and whether any fall out
+qqperf backlog --store DIR --repo innernet --checkout PATH        # how many are owed, and the oldest
 qqperf record build-size --store DIR --repo innernet --checkout PATH --dist PATH/.next --runner LABEL
 qqperf history --store DIR --repo innernet [--value static_js_gzip_bytes] [--json]
 qqperf merge --store DIR --from DIR --repo innernet [--metric M] [--commit SHA]... [--run-url URL]

@@ -93,7 +93,9 @@ def commit_time(checkout: Path, commit: str) -> str:
 def since_first(landed: list[str], seen: set[str]) -> list[str]:
     """The landed commits (newest first) down to the oldest one with any record: the history perf
     is responsible for. Older commits landed before perf measured this stream and are left alone.
-    With no record yet, every landed commit (the newest is measured first)."""
+    With no record yet, every landed commit (the newest is measured first). Two edges: a first
+    record refused because main moved on lets a newer commit anchor the stream, and a rewritten
+    main that keeps none of the recorded commits starts the stream afresh."""
     oldest = max((i for i, c in enumerate(landed) if c in seen), default=len(landed) - 1)
     return landed[: oldest + 1]
 

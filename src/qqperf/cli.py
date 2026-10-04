@@ -15,9 +15,8 @@
 
 `pending` lists the commits of a branch (first parent, newest first) with no ok record that have
 not yet failed MAX_ATTEMPTS times, down to the oldest commit the store has any record of (older
-commits landed before perf measured the stream). `backlog` prints, as JSON, how many of those there are among
-the commits the checkout holds and whether commits are falling out of a shallow checkout before
-they are measured. `record build-size` measures a finished Next.js build and stores
+commits landed before perf measured the stream). `backlog` prints, as JSON, how many of those there are, the oldest
+of them, and whether a shallow checkout hides owed commits. `record build-size` measures a finished Next.js build and stores
 one record; with `--error` it stores a failed record instead, so the history shows the gap.
 `record bench` stores what recipes' `bench` capability measured (a failed benchmark is a failed
 record). `bundle` writes the record one run added as a test-pipelines results bundle: a Run with
