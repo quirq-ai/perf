@@ -1,1 +1,11 @@
-# Owners are assigned by suraj (V0-ORG-02). Left empty on purpose.
+# Owners for quirq-ai/perf (V0-ORG-02), named by suraj. Only the paths that set policy or
+# that a gate or workflow trusts are owned; there is no catch-all, so other changes merge on
+# green CI and review alone. Owner names are suraj's call: never change them.
+# workflows and this file
+/.github/        @sharmasuraj0123
+# test-pipelines pinned by commit
+/pyproject.toml  @sharmasuraj0123
+# qqperf wrapper the trusted store and publish jobs run
+/tools/          @sharmasuraj0123
+# the qqperf code the store job runs with contents: write
+/src/qqperf/     @sharmasuraj0123
