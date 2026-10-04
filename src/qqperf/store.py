@@ -6,9 +6,9 @@ never edited. A commit gets at most one `ok` record; a failed measurement may be
 appending another record, up to MAX_ATTEMPTS failures, so a flaky build does not leave a
 permanent gap and a broken one is not rebuilt forever.
 
-On GitHub the directory is the `perf-data` branch of this repo, which the build-size workflow
-checks out, appends to and pushes. TODO(expert): move to test-pipelines' results store (V0-TST-02)
-as part of V0-PRF-01, importing these files, and keep this backend for local runs.
+On GitHub the directory is the `perf-data` branch of this repo, which the perf workflow checks
+out, appends to and pushes. It is the ledger of what is measured; the system of record for the
+numbers is test-pipelines' results store, which gets every record as a results bundle (results.py).
 """
 from __future__ import annotations
 

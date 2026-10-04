@@ -20,41 +20,86 @@ jobs:
           python-version: "3.14.8"
       - run: python -m pip install --quiet -e ".[test]"
       - run: python -m pytest -q -p no:cacheprovider
-  # V0-PRF-02 end to end: build innernet through recipes' node-app adapter and record its size,
-  # with the same script the build-size workflow runs, into a scratch store.
-  build-size:
+  # End to end, with the same scripts the perf workflow runs, at pinned product commits, into
+  # scratch stores: V0-PRF-02's build size of innernet, and V0-PRF-01's benchmark of each product
+  # repo. Each record is also written as a results bundle and read back with qqresults; presubmit
+  # keeps no bundle artifact, so these numbers never reach the results store.
+  measure:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - metric: build-size
+            repo: innernet
+            commit: da9b84cf811f4358e3ee0b5d9d4388b69bf481e9
+            node: true
+          - metric: xo-space-server-start
+            repo: xo-space
+            commit: c3cea98c8e70479b1f0cb8f871e28f8f6ee5a4f6
+            target: server
+            params: '{"bench": {"measure": "startup", "samples": 5, "warmup": 1}}'
+          - metric: innernet-search
+            repo: innernet
+            commit: da9b84cf811f4358e3ee0b5d9d4388b69bf481e9
+            target: app
+            node: true
+            params: >-
+              {"env": {"INNERNET_DEMO": "1"}, "bench": {"measure": "latency", "samples": 10, "warmup": 2,
+              "paths": ["/search?q=build", "/search?q=quirq", "/search?q=readme"]}}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@v7
+        id: python
         with:
           python-version: "3.14.8"
       - run: python -m pip install --quiet -e ".[build]"
       - uses: actions/checkout@v7
         with:
-          repository: quirq-ai/innernet
-          ref: da9b84cf811f4358e3ee0b5d9d4388b69bf481e9  # TODO(expert): let rollers move this pin.
-          path: .qq/innernet
+          repository: quirq-ai/${{ matrix.repo }}
+          ref: ${{ matrix.commit }}  # TODO(expert): let rollers move these pins.
+          path: .qq/product
           persist-credentials: false
       - uses: actions/checkout@v7
         with:
           repository: quirq-ai/sync
-          ref: 5abac76af194a40961074ce75432f4fdb79fe951
+          ref: 8f624f4a7fe3abdab2c7b83376f1ae7772073fd4
           path: .qq/sync
           persist-credentials: false
       - uses: actions/setup-node@v7
+        if: matrix.node
         with:
           node-version: "24.21.0"
       - uses: pnpm/action-setup@v6
+        if: matrix.node
         with:
           version: "11.28.2"
-      - name: build innernet and record its size
+      - name: measure and record
+        env:
+          REPO: ${{ matrix.repo }}
+          METRIC: ${{ matrix.metric }}
+          TARGET: ${{ matrix.target }}
+          PARAMS: ${{ matrix.params }}
+          COMMIT: ${{ matrix.commit }}
+          PYTHON_ROOT: ${{ steps.python.outputs.python-path }}
+          QQ_RESULTS_OUT: .qq/results
         run: |
-          tools/build_commits.sh .qq/innernet .qq/sync/tests/fixtures/innernet.repo.toml .qq/new \
-            innernet ubuntu-24.04 da9b84cf811f4358e3ee0b5d9d4388b69bf481e9
-          qqperf history --store .qq/new --repo innernet --json
-          # A failed build is recorded too; here it must have succeeded.
-          qqperf history --store .qq/new --repo innernet | grep -q bytes
+          fixture=.qq/sync/tests/fixtures/$REPO.repo.toml
+          if [ "$METRIC" = build-size ]; then
+            tools/build_commits.sh .qq/product "$fixture" .qq/new "$REPO" ubuntu-24.04 "$COMMIT"
+          elif [ "$REPO" = xo-space ]; then
+            QQ_RECIPES_ARGS="--toolchain python=$(dirname "$(dirname "$PYTHON_ROOT")")" \
+              tools/bench_commit.sh .qq/product "$fixture" "$TARGET" "$PARAMS" .qq/new "$REPO" "$METRIC" \
+                ubuntu-24.04 "$COMMIT"
+          else
+            tools/bench_commit.sh .qq/product "$fixture" "$TARGET" "$PARAMS" .qq/new "$REPO" "$METRIC" \
+              ubuntu-24.04 "$COMMIT"
+          fi
+          qqperf history --store .qq/new --repo "$REPO" --metric "$METRIC" --json
+          # A failure is recorded too; here the measurement must have succeeded.
+          test "$(qqperf history --store .qq/new --repo "$REPO" --metric "$METRIC" --json \
+            | python -c 'import json, sys; print(json.load(sys.stdin)[0]["status"])')" = ok
+          for b in .qq/results/qq-results-*; do qqresults show "$b"; cat "$b/results.jsonl"; done

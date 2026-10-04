@@ -8,13 +8,19 @@ dynamic = ["version"]
 description = "Performance records for quirq infra (qq): raw numbers with units, per commit."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+# Results go to test-pipelines' store, written with its own qqresults (V0-TST-02, quirq-ai/test-pipelines#3),
+# by pinned commit. TODO(expert): let rollers move this pin.
+dependencies = ["qqresults @ git+https://github.com/quirq-ai/test-pipelines@3aeed94f733a99cac22f29a47578cd8ff88bf3ae"]
 
 [project.optional-dependencies]
-test = ["pytest==9.1.1"]
-# What the build-size workflow builds with: recipes' node-app adapter (V0-REC-03, quirq-ai/recipes#4),
-# by pinned commit. TODO(expert): let rollers move this pin.
-build = ["qqrecipes @ git+https://github.com/quirq-ai/recipes@c3b0cafa72da512e14eae90f5d0bac49692b835b"]
+test = [
+    "pytest==9.1.1",
+    # The manifest command edits through qqsync; the build extra brings it in through recipes.
+    "qqsync @ git+https://github.com/quirq-ai/sync@8f624f4a7fe3abdab2c7b83376f1ae7772073fd4",
+]
+# What the perf workflow builds and benchmarks with: recipes' adapters, including `bench`
+# (V0-PRF-01, quirq-ai/recipes#10), by pinned commit. TODO(expert): let rollers move this pin.
+build = ["qqrecipes @ git+https://github.com/quirq-ai/recipes@ab25f8c5b172c1357337e8afdf97d67338d43f46"]
 
 [project.scripts]
 qqperf = "qqperf.cli:main"
