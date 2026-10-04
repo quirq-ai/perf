@@ -107,6 +107,14 @@ jobs:
           commit=$(qqperf pending --store .qq/data --repo "$REPO" --metric "$METRIC" --checkout .qq/product --limit 1)
           echo "pending: ${commit:-none}"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          # Make the backlog visible: one commit is measured per run, newest first, from the last
+          # 50 on main, so a busy day leaves older commits unmeasured once they pass that window.
+          backlog=$(qqperf backlog --store .qq/data --repo "$REPO" --metric "$METRIC" --checkout .qq/product)
+          echo "backlog: $backlog"
+          echo "$REPO $METRIC backlog: \`$backlog\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(jq -r .falling_out <<<"$backlog")" = true ]; then
+            echo "::warning::$REPO $METRIC: $(jq -r .pending <<<"$backlog") of the last $(jq -r .landed <<<"$backlog") commits on main have no record; older commits are no longer measured"
+          fi
       - name: measure it
         id: measure
         if: steps.pending.outputs.commit != ''

@@ -27,7 +27,10 @@ Plan and every v0 item: [quirq-ai/infra-config](https://github.com/quirq-ai/infr
 
 `.github/workflows/perf.yml` runs every 30 minutes (or on dispatch). For each measurement it takes
 the newest commit on the product repo's `main` (first parent) that has no record yet, so a backlog
-drains one commit per run:
+drains one commit per run. It looks at the last 50 commits on `main` only, so "every post-submit
+commit" holds while main lands fewer than about 48 commits a day; past that, older commits are
+skipped. Each run writes the backlog (`qqperf backlog`) to its summary and warns when commits are
+falling out of the window unmeasured:
 
 | Metric | Item | Repo | What |
 |---|---|---|---|
@@ -57,6 +60,7 @@ bundles from it alone.
 
 ```sh
 qqperf pending --store DIR --repo innernet --checkout PATH        # landed commits with no record
+qqperf backlog --store DIR --repo innernet --checkout PATH        # how many, and whether any fall out
 qqperf record build-size --store DIR --repo innernet --checkout PATH --dist PATH/.next --runner LABEL
 qqperf history --store DIR --repo innernet [--value static_js_gzip_bytes] [--json]
 qqperf merge --store DIR --from DIR --repo innernet [--metric M] [--commit SHA]... [--run-url URL]

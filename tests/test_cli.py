@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import pytest
 
@@ -184,3 +185,27 @@ def test_manifest_adds_params(tmp_path, capsys):
                            "bench": {"paths": ["/search?q=qq"], "samples": 10}}
     assert cli.main(["manifest", "--base", str(base), "--target", "nope", "--params", "{}", "--out", str(out)]) == 1
     assert cli.main(["manifest", "--base", str(base), "--target", "app", "--params", "[1]", "--out", str(out)]) == 1
+
+
+def test_backlog(tmp_path, product_repo, next_dist, capsys):
+    base = ["--store", str(tmp_path / "store"), "--repo", "innernet"]
+    assert cli.main(["backlog", *base, "--checkout", str(product_repo)]) == 0
+    full = json.loads(capsys.readouterr().out)
+    assert (full["landed"], full["pending"], full["falling_out"]) == (3, 3, False)
+
+    # A shallow clone of the newest two: its oldest commit is pending, so older ones fall out.
+    shallow = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "2", f"file://{product_repo}", str(shallow)],
+                   check=True)
+    assert cli.main(["backlog", *base, "--checkout", str(shallow)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["landed"], out["pending"], out["falling_out"]) == (2, 2, True)
+    oldest = out["oldest_pending"]
+
+    assert cli.main(["record", "build-size", *base, "--checkout", str(shallow), "--commit", oldest,
+                     "--dist", str(next_dist), "--runner", "ubuntu-24.04"]) == 0
+    capsys.readouterr()
+    assert cli.main(["backlog", *base, "--checkout", str(shallow)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["pending"], out["falling_out"]) == (1, False)
+    assert out["oldest_pending"] != oldest

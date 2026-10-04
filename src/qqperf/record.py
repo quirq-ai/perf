@@ -71,6 +71,21 @@ def first_parent(checkout: Path, ref: str = "HEAD") -> list[str]:
     return _git(checkout, "rev-list", "--first-parent", ref).split()
 
 
+def is_shallow(checkout: Path) -> bool:
+    """Whether the checkout's history stops short of the branch's first commit (a shallow clone)."""
+    return _git(checkout, "rev-parse", "--is-shallow-repository").strip() == "true"
+
+
+def backlog(landed: list[str], recorded: set[str], shallow: bool) -> dict:
+    """How far measuring is behind: the landed commits seen, those with no record yet, the oldest of
+    them, and whether commits are falling out unmeasured (the history seen is cut short and its
+    oldest commit is still pending, so older ones will never be listed as pending)."""
+    waiting = [c for c in landed if c not in recorded]
+    return {"landed": len(landed), "pending": len(waiting),
+            "oldest_pending": waiting[-1] if waiting else None,
+            "falling_out": bool(shallow and landed and landed[-1] not in recorded)}
+
+
 def commit_time(checkout: Path, commit: str) -> str:
     return _git(checkout, "show", "-s", "--format=%cI", "--end-of-options", commit).strip()
 
