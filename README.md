@@ -44,7 +44,7 @@ qqperf merge --store DIR --from DIR --repo innernet
 
 | Item | What | PR | State |
 |---|---|---|---|
-| V0-PRF-02 | Build-size record for Next.js apps | #2 | in review |
+| V0-PRF-02 | Build-size record for Next.js apps | #2 | merged; innernet history on [`perf-data`](../../blob/perf-data/innernet/build-size.jsonl) since run [37202550498](../../actions/runs/37202550498) |
 | V0-PRF-01 | `bench` capability and storage | | waits on V0-TST-02 (test-pipelines) |
 
 ## Working here
