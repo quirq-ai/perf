@@ -5,6 +5,7 @@
 # perf run's `store` job validated and pushed to `perf-data` (those naming that run) and writes
 # each as a bundle. test-pipelines' scorecard collects perf bundles only from runs of this
 # workflow (event workflow_run, branch main), so no job that ran product code can add results.
+# It downloads nothing from the perf run: what it publishes comes from perf-data alone.
 name: perf-publish
 on:
   workflow_run:
@@ -17,6 +18,12 @@ env:
   DATA_BRANCH: perf-data
 jobs:
   publish:
+    # Only a perf run on this repo's main, from its schedule or a dispatch: workflow_run also fires
+    # for runs on other branches or from other repos' pull requests, if perf.yml ever gets one.
+    if: >-
+      github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+      && contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event.workflow_run.event)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
