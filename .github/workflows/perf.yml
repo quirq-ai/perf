@@ -183,11 +183,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
-        with:
-          python-version: "3.14.8"
-      # Nothing is installed: qqperf runs from this checkout (tools/qqperf), so no build backend or
-      # package index runs in the job that holds write access.
+      # Nothing is fetched or installed: qqperf runs from this checkout (tools/qqperf) on the
+      # runner's own python3, so no build backend, package index or Python download runs in the job
+      # that holds write access.
       - run: echo "$GITHUB_WORKSPACE/tools" >> "$GITHUB_PATH"
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         continue-on-error: true  # none when no job had a commit to measure

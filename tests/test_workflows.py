@@ -27,4 +27,4 @@ def test_trusted_jobs_install_nothing():
     publish = (ROOT / ".github" / "workflows" / "perf-publish.yml").read_text()
     store = (ROOT / ".github" / "workflows" / "perf.yml").read_text().split("\n  store:\n")[1]
     for text in (publish, store):
-        assert "pip install" not in text
+        assert "pip install" not in text and "setup-python" not in text
