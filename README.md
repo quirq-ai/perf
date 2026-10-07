@@ -82,6 +82,9 @@ qqperf manifest --base repo.toml --target app --params '{"bench": {...}}' --out 
 | V0-PRF-02 | Build-size record for Next.js apps | #2 | merged; innernet history on [`perf-data`](../../blob/perf-data/innernet/build-size.jsonl) since run [37202550498](../../actions/runs/37202550498) |
 | V0-PRF-01 | `bench` capability and storage | recipes#10, #4, #5 | merged; first records from run [37204645471](../../actions/runs/37204645471), in test-pipelines' results store. Polls `main` until product post-submit exists (V0-GAR-01) |
 
+As of 2026-10-07, the newest record on `perf-data` is from 2026-10-05 (run 37359203431): GitHub is
+throttling the scheduled runs, so commits since then are still pending.
+
 ## Working here
 
 See [AGENTS.md](AGENTS.md). Run the checks with `python -m pytest`.
