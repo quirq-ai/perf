@@ -47,3 +47,10 @@ def test_store_downloads_each_leg_by_name():
     assert "continue-on-error" not in store.split("- name: append to the history branch")[0]
     allowlist = re.search(r'case "\$repo/\$metric" in\n\s+(\S+)\)', store).group(1)
     assert set(allowlist.split("|")) == {f"{repo}/{metric}" for metric, repo in legs}
+
+
+def test_store_skips_an_empty_ledger_directory():
+    store = (ROOT / ".github" / "workflows" / "perf.yml").read_text().split("\n  store:\n")[1]
+    loop = store.split("          for dir in .qq/new/ledger--*/; do\n")[1]
+    assert loop.splitlines()[2].strip() == \
+        "[ -n \"$(find \"$dir\" -name '*.jsonl' -print -quit)\" ] || continue"

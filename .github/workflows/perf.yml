@@ -247,6 +247,8 @@ jobs:
           shopt -s nullglob
           for dir in .qq/new/ledger--*/; do
             dir=${dir%/}
+            # A leg with nothing to measure downloads nothing; an empty directory is not a ledger.
+            [ -n "$(find "$dir" -name '*.jsonl' -print -quit)" ] || continue
             name=${dir##*/ledger--}
             repo=${name%%--*} metric=${name#*--}
             case "$repo/$metric" in
