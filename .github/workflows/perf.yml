@@ -198,7 +198,8 @@ jobs:
       # One download per leg, by name, each into its own directory: the directory name is what
       # binds a ledger to its repo and metric below. (A pattern download that matches only one
       # artifact extracts it straight into `path`, with no directory to name it.) A leg uploads
-      # no ledger when it had no commit to measure, so a missing one is not an error.
+      # no ledger when it had no commit to measure, so its "Artifact not found" error is expected
+      # and does not fail the job.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         continue-on-error: true
         with:
