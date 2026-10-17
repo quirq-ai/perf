@@ -28,3 +28,18 @@ def test_trusted_jobs_install_nothing():
     store = (ROOT / ".github" / "workflows" / "perf.yml").read_text().split("\n  store:\n")[1]
     for text in (publish, store):
         assert "pip install" not in text and "setup-python" not in text
+
+
+def test_store_downloads_each_leg_by_name():
+    perf = (ROOT / ".github" / "workflows" / "perf.yml").read_text()
+    measure, store = perf.split("\n  store:\n")
+    legs = set(re.findall(r"- metric: (\S+)\n\s+repo: (\S+)", measure))
+    names = {f"ledger--{repo}--{metric}" for metric, repo in legs}
+    assert len(legs) == 3
+    # A pattern download of a single artifact extracts it with no directory naming its leg.
+    assert "pattern:" not in store
+    downloads = re.findall(r"name: (ledger--\S+)\n\s+path: \.qq/new/(\S+)", store)
+    assert {name for name, _ in downloads} == names
+    assert all(name == path for name, path in downloads)
+    allowlist = re.search(r'case "\$repo/\$metric" in\n\s+(\S+)\)', store).group(1)
+    assert set(allowlist.split("|")) == {f"{repo}/{metric}" for metric, repo in legs}

@@ -195,11 +195,25 @@ jobs:
       # runner's own python3, so no build backend, package index or Python download runs in the job
       # that holds write access.
       - run: echo "$GITHUB_WORKSPACE/tools" >> "$GITHUB_PATH"
+      # One download per leg, by name, each into its own directory: the directory name is what
+      # binds a ledger to its repo and metric below. (A pattern download that matches only one
+      # artifact extracts it straight into `path`, with no directory to name it.) A leg uploads
+      # no ledger when it had no commit to measure, so a missing one is not an error.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
-        continue-on-error: true  # none when no job had a commit to measure
+        continue-on-error: true
         with:
-          pattern: ledger--*
-          path: .qq/new
+          name: ledger--innernet--build-size
+          path: .qq/new/ledger--innernet--build-size
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        continue-on-error: true
+        with:
+          name: ledger--xo-space--xo-space-server-start
+          path: .qq/new/ledger--xo-space--xo-space-server-start
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        continue-on-error: true
+        with:
+          name: ledger--innernet--innernet-search
+          path: .qq/new/ledger--innernet--innernet-search
       - name: append to the history branch
         id: store
         shell: bash  # -eo pipefail
@@ -231,7 +245,9 @@ jobs:
           # TODO(expert): isolate each repo's measurement in its own workflow run.
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/"
           refused=0
-          for dir in .qq/new/ledger--*; do
+          shopt -s nullglob
+          for dir in .qq/new/ledger--*/; do
+            dir=${dir%/}
             name=${dir##*/ledger--}
             repo=${name%%--*} metric=${name#*--}
             case "$repo/$metric" in
