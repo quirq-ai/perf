@@ -195,25 +195,23 @@ jobs:
       # runner's own python3, so no build backend, package index or Python download runs in the job
       # that holds write access.
       - run: echo "$GITHUB_WORKSPACE/tools" >> "$GITHUB_PATH"
-      # One download per leg, by name, each into its own directory: the directory name is what
-      # binds a ledger to its repo and metric below. (A pattern download that matches only one
-      # artifact extracts it straight into `path`, with no directory to name it.) A leg uploads
-      # no ledger when it had no commit to measure, so its "Artifact not found" error is expected
-      # and does not fail the job.
+      # One download per leg, each into its own directory: the directory name is what binds a
+      # ledger to its repo and metric below. (A pattern download that matches only one artifact
+      # extracts it straight into `path`, with no directory to name it.) Each pattern is the leg's
+      # exact artifact name: a leg with no commit to measure uploads no ledger, and a pattern
+      # that matches nothing downloads nothing and succeeds, so any other download error still
+      # fails the job.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
-        continue-on-error: true
         with:
-          name: ledger--innernet--build-size
+          pattern: ledger--innernet--build-size
           path: .qq/new/ledger--innernet--build-size
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
-        continue-on-error: true
         with:
-          name: ledger--xo-space--xo-space-server-start
+          pattern: ledger--xo-space--xo-space-server-start
           path: .qq/new/ledger--xo-space--xo-space-server-start
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
-        continue-on-error: true
         with:
-          name: ledger--innernet--innernet-search
+          pattern: ledger--innernet--innernet-search
           path: .qq/new/ledger--innernet--innernet-search
       - name: append to the history branch
         id: store

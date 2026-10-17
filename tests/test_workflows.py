@@ -36,12 +36,14 @@ def test_store_downloads_each_leg_by_name():
     legs = set(re.findall(r"- metric: (\S+)\n\s+repo: (\S+)", measure))
     names = {f"ledger--{repo}--{metric}" for metric, repo in legs}
     assert len(legs) == 3
-    # A pattern download of a single artifact extracts it with no directory naming its leg.
-    assert "pattern:" not in store
-    downloads = re.findall(r"name: (ledger--\S+)\n\s+path: \.qq/new/(\S+)", store)
+    # Each leg's exact name, into its own directory: a pattern download that matches one artifact
+    # extracts it with no directory naming its leg, and a wildcard would let one leg's artifact
+    # land in another's directory.
+    downloads = re.findall(r"pattern: (\S+)\n\s+path: \.qq/new/(\S+)", store)
     assert {name for name, _ in downloads} == names
     assert all(name == path for name, path in downloads)
-    # A leg with nothing to measure uploads no ledger; its missing download must not stop the job.
-    assert len(re.findall(r"continue-on-error: true\n\s+with:\n\s+name: ledger--", store)) == len(names)
+    assert store.count("pattern:") == len(names) and "name: ledger--" not in store
+    # A real download failure must fail the job; an absent ledger already matches nothing.
+    assert "continue-on-error" not in store.split("- name: append to the history branch")[0]
     allowlist = re.search(r'case "\$repo/\$metric" in\n\s+(\S+)\)', store).group(1)
     assert set(allowlist.split("|")) == {f"{repo}/{metric}" for metric, repo in legs}
