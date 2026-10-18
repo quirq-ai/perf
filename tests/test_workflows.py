@@ -28,3 +28,29 @@ def test_trusted_jobs_install_nothing():
     store = (ROOT / ".github" / "workflows" / "perf.yml").read_text().split("\n  store:\n")[1]
     for text in (publish, store):
         assert "pip install" not in text and "setup-python" not in text
+
+
+def test_store_downloads_each_leg_by_name():
+    perf = (ROOT / ".github" / "workflows" / "perf.yml").read_text()
+    measure, store = perf.split("\n  store:\n")
+    legs = set(re.findall(r"- metric: (\S+)\n\s+repo: (\S+)", measure))
+    names = {f"ledger--{repo}--{metric}" for metric, repo in legs}
+    assert len(legs) == 3
+    # Each leg's exact name, into its own directory: a pattern download that matches one artifact
+    # extracts it with no directory naming its leg, and a wildcard would let one leg's artifact
+    # land in another's directory.
+    downloads = re.findall(r"pattern: (\S+)\n\s+path: \.qq/new/(\S+)", store)
+    assert {name for name, _ in downloads} == names
+    assert all(name == path for name, path in downloads)
+    assert store.count("pattern:") == len(names) and "name: ledger--" not in store
+    # A real download failure must fail the job; an absent ledger already matches nothing.
+    assert "continue-on-error" not in store.split("- name: append to the history branch")[0]
+    allowlist = re.search(r'case "\$repo/\$metric" in\n\s+(\S+)\)', store).group(1)
+    assert set(allowlist.split("|")) == {f"{repo}/{metric}" for metric, repo in legs}
+
+
+def test_store_skips_an_empty_ledger_directory():
+    store = (ROOT / ".github" / "workflows" / "perf.yml").read_text().split("\n  store:\n")[1]
+    loop = store.split("          for dir in .qq/new/ledger--*/; do\n")[1]
+    assert loop.splitlines()[2].strip() == \
+        "[ -n \"$(find \"$dir\" -name '*.jsonl' -print -quit)\" ] || continue"

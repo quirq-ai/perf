@@ -195,11 +195,24 @@ jobs:
       # runner's own python3, so no build backend, package index or Python download runs in the job
       # that holds write access.
       - run: echo "$GITHUB_WORKSPACE/tools" >> "$GITHUB_PATH"
+      # One download per leg, each into its own directory: the directory name is what binds a
+      # ledger to its repo and metric below. (A pattern download that matches only one artifact
+      # extracts it straight into `path`, with no directory to name it.) Each pattern is the leg's
+      # exact artifact name: a leg with no commit to measure uploads no ledger, and a pattern
+      # that matches nothing downloads nothing and succeeds, so any other download error still
+      # fails the job.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
-        continue-on-error: true  # none when no job had a commit to measure
         with:
-          pattern: ledger--*
-          path: .qq/new
+          pattern: ledger--innernet--build-size
+          path: .qq/new/ledger--innernet--build-size
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: ledger--xo-space--xo-space-server-start
+          path: .qq/new/ledger--xo-space--xo-space-server-start
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: ledger--innernet--innernet-search
+          path: .qq/new/ledger--innernet--innernet-search
       - name: append to the history branch
         id: store
         shell: bash  # -eo pipefail
@@ -231,7 +244,11 @@ jobs:
           # TODO(expert): isolate each repo's measurement in its own workflow run.
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/"
           refused=0
-          for dir in .qq/new/ledger--*; do
+          shopt -s nullglob
+          for dir in .qq/new/ledger--*/; do
+            dir=${dir%/}
+            # A leg with nothing to measure downloads nothing; an empty directory is not a ledger.
+            [ -n "$(find "$dir" -name '*.jsonl' -print -quit)" ] || continue
             name=${dir##*/ledger--}
             repo=${name%%--*} metric=${name#*--}
             case "$repo/$metric" in
